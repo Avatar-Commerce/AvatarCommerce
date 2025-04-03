@@ -11,5 +11,3 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "default-secret-key")  # Add this line
 
-
-#This should have been added to the .env file
