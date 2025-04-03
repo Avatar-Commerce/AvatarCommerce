@@ -1,14 +1,15 @@
 import requests
 from langchain_openai import ChatOpenAI
-from config import OPENAI_API_KEY, APIFY_API_KEY
+from config import OPENAI_API_KEY, APIFY_API_KEY, HEYGEN_API_KEY
 
 class Chatbot:
     def __init__(self):
         self.llm = ChatOpenAI(openai_api_key=OPENAI_API_KEY)
+        self.heygen_api_key = HEYGEN_API_KEY
 
     def get_product_recommendations(self, query, influencer_id):
         """Fetch product recommendations from Amazon using Apify API."""
-        apify_url = "https://api.apify.com/v2/acts/apify~amazon-scraper/run-sync-get-dataset"
+        apify_url = "https://api.apify.com/v2/acts/michodemic~amazon-category-scrapper/run-sync-get-dataset"
         params = {
             "token": APIFY_API_KEY,
             "queries": [query],
@@ -46,3 +47,43 @@ class Chatbot:
         prompt = f"Influencer Chatbot: {message}"
         response = self.llm.invoke(prompt)
         return response.content if hasattr(response, 'content') else str(response)
+    
+    def generate_avatar_video(self, text: str, avatar_id: str) -> str:
+        """Generate avatar video using HeyGen API"""
+        headers = {
+            "X-Api-Key": self.heygen_api_key,
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "avatar_id": avatar_id,
+            "text": text,
+            "voice_id": "1bd001e7e50f421d891986aad5158bc8"  # Default voice
+        }
+        
+        response = requests.post(
+            "https://api.heygen.com/v1/videos.generate",
+            headers=headers,
+            json=payload
+        )
+        
+        if response.status_code == 200:
+            return response.json().get("video_url", "")
+        return ""
+
+    def get_response(self, message, influencer_id):
+        """Generate response with optional video avatar"""
+        if "recommend" in message.lower():
+            query = message.replace("recommend", "").strip()
+            text_response = self.get_product_recommendations(query, influencer_id)
+        else:
+            prompt = f"Influencer Chatbot: {message}"
+            response = self.llm.invoke(prompt)
+            text_response = response.content if hasattr(response, 'content') else str(response)
+        
+        # Generate video avatar for the response
+        video_url = self.generate_avatar_video(text_response, influencer_id)
+        
+        return {
+            "text": text_response,
+            "video_url": video_url
+        }

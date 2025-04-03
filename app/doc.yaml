@@ -2,6 +2,9 @@ openapi: 3.0.0
 info:
   title: Influencer Chatbot API
   version: 1.0.0
+servers:
+  - url: http://localhost:5000  # Update with your actual server URL
+    description: Local development server
 paths:
   /chat:
     post:
@@ -15,13 +18,44 @@ paths:
               properties:
                 message:
                   type: string
+                influencer_id:
+                  type: string
       responses:
         "200":
-          description: "Chatbot response"
+          description: "Chatbot response with video avatar"
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  response:
+                  text:
+                    type: string
+                  video_url:
+                    type: string
+  /create-avatar:
+    post:
+      summary: "Create a HeyGen avatar from uploaded media"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                influencer_id:
+                  type: string
+      responses:
+        "200":
+          description: "Avatar created successfully"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  avatar_id:
+                    type: string
+                  message:
                     type: string
