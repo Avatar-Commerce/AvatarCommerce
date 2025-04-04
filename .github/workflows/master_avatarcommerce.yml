@@ -28,14 +28,14 @@ jobs:
         password: ${{ secrets.ACR_PASSWORD }}
     
     - name: Build and push Docker image
-      uses: docker/build-push-action@v2
+      uses: docker/build-push-action@v3  # Update to v3
       with:
         context: .
         push: true
-        tags: projectx.azurecr.io/avatarcommerce:${{ github.run_number }},projectx.azurecr.io/avatarcommerce:180
-    
+        tags: projectX.azurecr.io/avatarcommerce:${{ github.run_number }},projectX.azurecr.io/avatarcommerce:latest
+
     - name: Deploy to Azure App Service
       uses: azure/webapps-deploy@v2
       with:
         app-name: 'avatarcommerce-f5gyb7c4aahvc6d4'
-        images: 'projectx.azurecr.io/avatarcommerce:${{ github.run_number }}'
+        images: 'projectX.azurecr.io/avatarcommerce:${{ github.run_number }}'
