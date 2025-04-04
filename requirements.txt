@@ -6,3 +6,8 @@ requests
 python-dotenv
 flask-cors
 flask
+werkzeug
+supabase
+flasgger
+gunicorn
+pyjwt
