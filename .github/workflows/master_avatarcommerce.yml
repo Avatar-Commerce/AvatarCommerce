@@ -37,5 +37,5 @@ jobs:
     - name: Deploy to Azure App Service
       uses: azure/webapps-deploy@v2
       with:
-        app-name: 'avatarcommerce-f5gyb7c4aahvc6d4'
+        app-name: 'avatarcommerce'
         images: 'projectX.azurecr.io/avatarcommerce:${{ github.run_number }}'
