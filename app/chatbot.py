@@ -1,6 +1,7 @@
 import requests
 from langchain_openai import ChatOpenAI
 from config import OPENAI_API_KEY, APIFY_API_KEY, HEYGEN_API_KEY
+import time
 
 class Chatbot:
     def __init__(self):
@@ -115,33 +116,88 @@ class Chatbot:
         }
     
     def generate_avatar_video(self, text, avatar_id):
-        """Generate avatar video using HeyGen API"""
+        """Generate avatar video using HeyGen API v2"""
         headers = {
             "X-Api-Key": self.heygen_api_key,
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Accept": "application/json"
         }
         
         # Ensure text isn't too long for video generation
-        if len(text) > 500:
-            text = text[:497] + "..."
+        if len(text) > 1000:  # HeyGen v2 has 1500 char limit but we'll use 1000 to be safe
+            text = text[:997] + "..."
             
+        # Prepare payload according to v2 API
         payload = {
-            "avatar_id": avatar_id,
-            "text": text,
-            "voice_id": "1bd001e7e50f421d891986aad5158bc8"  # Default voice
+            "video_inputs": [
+                {
+                    "character": {
+                        "type": "avatar",
+                        "avatar_id": avatar_id,
+                        "avatar_style": "normal"
+                    },
+                    "voice": {
+                        "type": "text",
+                        "input_text": text,
+                        "voice_id": "1bd001e7e50f421d891986aad5158bc8",  # Default voice
+                        "speed": 1.0
+                    }
+                }
+            ],
+            "dimension": {
+                "width": 1280,
+                "height": 720
+            }
         }
         
         try:
+            # Generate video
             response = requests.post(
-                "https://api.heygen.com/v1/videos.generate",
+                "https://api.heygen.com/v2/video/generate",
                 headers=headers,
                 json=payload
             )
             
             if response.status_code == 200:
-                return response.json().get("video_url", "")
+                video_data = response.json()
+                video_id = video_data.get("data", {}).get("video_id")
+                
+                if not video_id:
+                    print(f"Error: No video_id in response: {response.text}")
+                    return ""
+                
+                # Now we need to check the video status and wait for it to complete
+                # We'll implement a simple polling mechanism with timeout
+                max_attempts = 20
+                attempt = 0
+                
+                while attempt < max_attempts:
+                    # Check video status
+                    status_response = requests.get(
+                        f"https://api.heygen.com/v1/video_status.get?video_id={video_id}",
+                        headers=headers
+                    )
+                    
+                    if status_response.status_code == 200:
+                        status_data = status_response.json()
+                        status = status_data.get("data", {}).get("status")
+                        
+                        if status == "completed":
+                            # Video is ready
+                            return status_data.get("data", {}).get("video_url", "")
+                        elif status == "failed":
+                            print(f"Video generation failed: {status_data}")
+                            return ""
+                    
+                    # Wait before checking again
+                    time.sleep(3)  # Wait 3 seconds between checks
+                    attempt += 1
+                
+                # If we reached here, the video wasn't ready within our timeout
+                print(f"Video generation timed out after {max_attempts} attempts")
+                return f"https://api.heygen.com/v1/video_status.get?video_id={video_id}"  # Return ID for manual checking
             else:
-                print(f"Error generating video: {response.text}")
+                print(f"Error generating video: {response.status_code} - {response.text}")
                 return ""
         except Exception as e:
             print(f"Exception generating video: {str(e)}")

@@ -39,3 +39,37 @@ TypeError: SyncBucketActionsMixin.upload() got an unexpected keyword argument 'h
 2025-04-04 22:25:54,538 ERROR: Upload error: {'statusCode': 403, 'error': Unauthorized, 'message': new row violates row-level security policy} [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:367]
 2025-04-04 22:35:24,845 ERROR: Upload error: {'statusCode': 413, 'error': Payload too large, 'message': The object exceeded the maximum allowed size} [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:361]
 2025-04-04 22:36:19,609 ERROR: Upload error: {'statusCode': 413, 'error': Payload too large, 'message': The object exceeded the maximum allowed size} [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:361]
+2025-04-05 09:16:21,339 ERROR: Avatar creation failed: name 'secure_filename' is not defined [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:488]
+2025-04-05 09:24:07,256 ERROR: HeyGen avatar creation failed: <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<title>404 Not Found</title>
+<h1>Not Found</h1>
+<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>
+ [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:427]
+2025-04-05 09:27:37,696 ERROR: Upload error: {'statusCode': 409, 'error': Duplicate, 'message': The resource already exists} [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:482]
+2025-04-05 09:28:26,055 ERROR: HeyGen avatar creation failed: <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<title>404 Not Found</title>
+<h1>Not Found</h1>
+<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>
+ [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:427]
+2025-04-05 09:33:30,127 ERROR: HeyGen avatar creation failed: <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<title>404 Not Found</title>
+<h1>Not Found</h1>
+<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>
+ [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:427]
+2025-04-05 10:03:48,300 ERROR: HeyGen API error: 0 [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:469]
+2025-04-05 10:08:55,090 INFO: Using HeyGen API key: YTExM...3Ng== [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:418]
+2025-04-05 10:08:55,090 INFO: Attempting to connect to HeyGen API... [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:422]
+2025-04-05 10:09:01,100 INFO: HeyGen API response status: 200 [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:429]
+2025-04-05 10:09:01,102 INFO: HeyGen API response body: {"error": null, "data": {"avatars": [{"avatar_id": "0019574bacd74bd9a2cb76ac19bfb773", "avatar_name": "Ademola", "gender": "unknown", "preview_image_url": "https://files2.heygen.ai/avatar/v3/0019574bacd74bd9a2cb76ac19bfb773/full/2.2/preview_target.webp", "preview_video_url": "https://files2.heygen.ai/avatar/v3/0019574bacd74bd9a2cb76ac19bfb773/full/2.2/preview_video_target.mp4", "premium": false, "type": null, "tags": null}, {"avatar_id": "0019574bacd74bd9a2cb76ac19bfb773", "avatar_name": "Ademol [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:430]
+2025-04-05 10:09:01,118 ERROR: HeyGen API error: 0 [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:490]
+2025-04-05 10:17:15,731 INFO: Attempting to connect to HeyGen API... [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:420]
+2025-04-05 10:17:21,533 INFO: HeyGen API response status: 200 [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:429]
+2025-04-05 10:17:21,548 ERROR: HeyGen API error: 0 [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:481]
+2025-04-05 10:17:21,551 ERROR: Traceback (most recent call last):
+  File "C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py", line 458, in create_avatar
+    avatar_id = avatars[0].get("avatar_id")
+                ~~~~~~~^^^
+KeyError: 0
+ [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:482]
+2025-04-05 10:22:46,381 INFO: Attempting to connect to HeyGen API... [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:419]
+2025-04-05 10:23:12,941 INFO: Using HeyGen avatar: 0019574bacd74bd9a2cb76ac19bfb773 [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:459]

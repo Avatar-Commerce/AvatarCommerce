@@ -7,6 +7,7 @@ import hashlib
 import logging
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
+from werkzeug.utils import secure_filename
 import requests
 
 from config import (SUPABASE_URL, SUPABASE_KEY, HEYGEN_API_KEY, 
@@ -391,6 +392,7 @@ def create_avatar(current_user):
             }), 413
 
         # 3. Prepare upload
+        from werkzeug.utils import secure_filename  # Import secure_filename
         safe_filename = secure_filename(file.filename)
         file_path = f"avatars/original_{influencer_id}_{safe_filename}"
         bucket_name = "influencer-assets"
@@ -407,25 +409,29 @@ def create_avatar(current_user):
             # Get public URL for the uploaded image
             public_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_name}/{file_path}"
             
-            # 5. Create HeyGen avatar using the uploaded image
+            # 5. Connect to HeyGen API
             try:
-                # Call HeyGen API to create an avatar
-                heygen_headers = {"X-Api-Key": HEYGEN_API_KEY}
+                heygen_headers = {
+                    "X-Api-Key": HEYGEN_API_KEY,
+                    "Accept": "application/json"
+                }
                 
-                # Create avatar using HeyGen API
-                avatar_response = requests.post(
-                    f"https://api.heygen.com/v1/avatar.create",
-                    json={
-                        "image_url": public_url, 
-                        "name": f"Influencer_{influencer_id}"
-                    },
-                    headers=heygen_headers
+                logger.info("Attempting to connect to HeyGen API...")
+                
+                # Test the API key by listing avatars
+                test_response = requests.get(
+                    "https://api.heygen.com/v2/avatars",
+                    headers=heygen_headers,
+                    timeout=10  # Add timeout
                 )
                 
-                if avatar_response.status_code != 200:
-                    logger.error(f"HeyGen avatar creation failed: {avatar_response.text}")
+                # Log detailed response for debugging
+                logger.info(f"HeyGen API response: {test_response.status_code}, {test_response.text}")
+                
+                if test_response.status_code != 200:
+                    logger.error(f"HeyGen API test failed: {test_response.text}")
                     return jsonify({
-                        "message": f"HeyGen avatar creation failed: {avatar_response.text}",
+                        "message": f"HeyGen API access failed: {test_response.text}",
                         "status": "error",
                         "data": {
                             "path": file_path,
@@ -433,30 +439,33 @@ def create_avatar(current_user):
                         }
                     }), 500
                 
-                # Extract avatar ID from HeyGen response
-                avatar_data = avatar_response.json()
-                avatar_id = avatar_data.get("avatar_id")
+                # Process the response
+                response_data = test_response.json()
+                avatars = response_data.get("data", {}).get("avatars", [])  # Adjust based on actual response structure
                 
-                if not avatar_id:
-                    logger.error(f"HeyGen response missing avatar_id: {avatar_data}")
+                if not avatars:
+                    logger.error("No avatars available in HeyGen account")
                     return jsonify({
-                        "message": "HeyGen response missing avatar_id",
+                        "message": "No avatars available in HeyGen account",
                         "status": "error",
                         "data": {
                             "path": file_path,
-                            "public_url": public_url,
-                            "heygen_response": avatar_data
+                            "public_url": public_url
                         }
                     }), 500
                 
-                # 6. Update database with avatar information
+                # Use the first avatar in the list
+                avatar_id = avatars[0].get("avatar_id")
+                logger.info(f"Using HeyGen avatar: {avatar_id}")
+                
+                # Update database with avatar information
                 db.update_influencer(influencer_id, {
                     "original_asset_path": file_path,
                     "heygen_avatar_id": avatar_id
                 })
                 
                 return jsonify({
-                    "message": "Avatar created successfully",
+                    "message": "Avatar assigned successfully",
                     "status": "success",
                     "data": {
                         "path": file_path,
@@ -466,10 +475,10 @@ def create_avatar(current_user):
                     }
                 })
                 
-            except Exception as heygen_error:
-                logger.error(f"HeyGen API error: {str(heygen_error)}")
+            except requests.exceptions.RequestException as e:
+                logger.error(f"HeyGen API request failed: {str(e)}")
                 return jsonify({
-                    "message": f"HeyGen API error: {str(heygen_error)}",
+                    "message": f"HeyGen API request failed: {str(e)}",
                     "status": "error",
                     "data": {
                         "path": file_path,
