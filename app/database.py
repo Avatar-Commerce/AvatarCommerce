@@ -37,6 +37,7 @@ class Database:
                         voice_id TEXT DEFAULT 'default_voice',
                         affiliate_id TEXT,
                         chat_page_url TEXT,
+                        bio TEXT,
                         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
                     );
@@ -44,6 +45,27 @@ class Database:
                 }).execute()
             except Exception as create_error:
                 logger.error(f"Influencers table creation failed: {str(create_error)}")
+        
+        try:
+            # Check if fans table exists
+            self.supabase.table("fans").select("*").limit(1).execute()
+        except Exception as e:
+            # If table doesn't exist, create it
+            try:
+                self.supabase.rpc('execute_sql', {
+                    'sql': """
+                    CREATE TABLE fans (
+                        id TEXT PRIMARY KEY,
+                        username TEXT UNIQUE NOT NULL,
+                        email TEXT UNIQUE NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                    );
+                    """
+                }).execute()
+            except Exception as create_error:
+                logger.error(f"Fans table creation failed: {str(create_error)}")
         
         try:
             # Check if affiliate_links table exists
@@ -78,18 +100,71 @@ class Database:
                     CREATE TABLE chat_interactions (
                         id TEXT PRIMARY KEY,
                         influencer_id TEXT NOT NULL,
+                        fan_id TEXT,
                         user_message TEXT NOT NULL,
                         bot_response TEXT NOT NULL,
                         product_recommendations BOOLEAN DEFAULT FALSE,
                         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                        FOREIGN KEY (influencer_id) REFERENCES influencers(id) ON DELETE CASCADE
+                        FOREIGN KEY (influencer_id) REFERENCES influencers(id) ON DELETE CASCADE,
+                        FOREIGN KEY (fan_id) REFERENCES fans(id) ON DELETE SET NULL
                     );
                     """
                 }).execute()
             except Exception as create_error:
                 logger.error(f"Chat interactions table creation failed: {str(create_error)}")
-                
-    # Authentication methods
+    
+    # Fan management methods
+    def create_fan(self, fan_data: Dict) -> Optional[Dict]:
+        """Create a new fan account"""
+        required_fields = {'id', 'username', 'email', 'password_hash'}
+        if not all(field in fan_data for field in required_fields):
+            logger.error(f"Missing required fields: {required_fields}")
+            return None
+        
+        try:
+            response = self.supabase.table('fans').insert(fan_data).execute()
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error creating fan: {str(e)}")
+            return None
+    
+    def get_fan_by_username(self, username: str) -> Optional[Dict]:
+        """Get fan by username"""
+        try:
+            response = self.supabase.table('fans') \
+                .select('*') \
+                .eq('username', username) \
+                .execute()
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error getting fan: {str(e)}")
+            return None
+    
+    def get_fan_by_email(self, email: str) -> Optional[Dict]:
+        """Get fan by email"""
+        try:
+            response = self.supabase.table('fans') \
+                .select('*') \
+                .eq('email', email) \
+                .execute()
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error getting fan: {str(e)}")
+            return None
+    
+    def get_fan(self, fan_id: str) -> Optional[Dict]:
+        """Get fan by ID"""
+        try:
+            response = self.supabase.table('fans') \
+                .select('*') \
+                .eq('id', fan_id) \
+                .execute()
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error getting fan: {str(e)}")
+            return None
+    
+    # Influencer management methods
     def create_influencer(self, influencer_data: Dict) -> Optional[Dict]:
         """Create a new influencer with authentication credentials"""
         required_fields = {'id', 'username', 'email', 'password_hash'}
@@ -132,7 +207,6 @@ class Database:
             logger.error(f"Error getting influencer: {str(e)}")
             return None
 
-    # Profile management methods
     def get_influencer(self, influencer_id: str) -> Optional[Dict]:
         """Get influencer by ID"""
         try:
@@ -257,12 +331,14 @@ class Database:
             
     # Chat interaction methods
     def log_chat_interaction(self, influencer_id: str, user_message: str, 
-                             bot_response: str, product_recommendations: bool) -> Optional[Dict]:
+                             bot_response: str, product_recommendations: bool,
+                             fan_id: Optional[str] = None) -> Optional[Dict]:
         """Log a chat interaction"""
         try:
             interaction_data = {
                 "id": str(uuid.uuid4()),
                 "influencer_id": influencer_id,
+                "fan_id": fan_id,
                 "user_message": user_message,
                 "bot_response": bot_response,
                 "product_recommendations": product_recommendations
@@ -273,3 +349,21 @@ class Database:
         except Exception as e:
             logger.error(f"Error logging chat interaction: {str(e)}")
             return None
+    
+    def get_chat_history(self, influencer_id: str, fan_id: Optional[str] = None, limit: int = 10) -> List[Dict]:
+        """Get chat history for a fan with an influencer"""
+        try:
+            query = self.supabase.table('chat_interactions') \
+                .select('*') \
+                .eq('influencer_id', influencer_id) \
+                .order('created_at', {'ascending': False}) \
+                .limit(limit)
+                
+            if fan_id:
+                query = query.eq('fan_id', fan_id)
+                
+            response = query.execute()
+            return response.data
+        except Exception as e:
+            logger.error(f"Error getting chat history: {str(e)}")
+            return []

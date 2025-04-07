@@ -9,13 +9,14 @@ from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
 from werkzeug.utils import secure_filename
 import requests
+import tempfile
+import base64
 
 from config import (SUPABASE_URL, SUPABASE_KEY, HEYGEN_API_KEY, 
                    SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET_KEY)
 from database import Database
 from chatbot import Chatbot
 from supabase import create_client, Client
-from flasgger import Swagger, swag_from
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -42,67 +43,18 @@ CORS(app)
 app.config['SECRET_KEY'] = JWT_SECRET_KEY
 app.config["DEBUG"] = True
 
-# Configure Swagger for API documentation
-app.config['SWAGGER'] = {
-    'title': 'Influencer Avatar Commerce Mobile API',
-    'uiversion': 3,
-    'specs_route': '/api/docs/',
-    'headers': [],
-    'specs': [
-        {
-            'endpoint': 'apispec',
-            'route': '/api/docs/apispec.json',
-            'rule_filter': lambda rule: True,
-            'model_filter': lambda tag: True,
-        }
-    ],
-}
-
-swagger_template = {
-    "info": {
-        "title": "Influencer Avatar Commerce Mobile API",
-        "description": "API for mobile application to manage influencer avatars and product recommendations",
-        "version": "1.0.0",
-    },
-    "schemes": ["http", "https"],
-    "tags": [
-        {
-            "name": "Auth",
-            "description": "Authentication operations"
-        },
-        {
-            "name": "Avatars",
-            "description": "Operations with digital avatars"
-        },
-        {
-            "name": "Chat",
-            "description": "Chat and video generation"
-        },
-        {
-            "name": "Affiliate",
-            "description": "Affiliate management operations"
-        },
-        {
-            "name": "Analytics",
-            "description": "Analytics and statistics"
-        }
-    ]
-}
-
-swagger = Swagger(app, template=swagger_template)
-
 # Initialize Supabase clients
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 admin_supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 # Initialize database and chatbot
 db = Database()
-chatbot = Chatbot()
+chatbot = Chatbot(db)  # Pass the db instance to chatbot
 
 #-----------------------
-# Authentication Helper
+# Authentication Helpers
 #-----------------------
-def token_required(f):
+def influencer_token_required(f):
     def decorated(*args, **kwargs):
         token = None
         
@@ -118,6 +70,11 @@ def token_required(f):
             
         try:
             data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
+            
+            # Verify it's an influencer token
+            if data.get('user_type') != 'influencer':
+                return jsonify({'message': 'Invalid token type!', 'status': 'error'}), 401
+                
             current_user = db.get_influencer_by_username(data['username'])
             
             if not current_user:
@@ -131,53 +88,59 @@ def token_required(f):
             
         return f(current_user, *args, **kwargs)
     
-    # Preserve the function name and docstring
     decorated.__name__ = f.__name__
-    decorated.__doc__ = f.__doc__
+    return decorated
+
+def fan_token_required(f):
+    def decorated(*args, **kwargs):
+        token = None
+        
+        if 'Authorization' in request.headers:
+            auth_header = request.headers['Authorization']
+            try:
+                token = auth_header.split(" ")[1]
+            except IndexError:
+                return jsonify({'message': 'Invalid token format!', 'status': 'error'}), 401
+        
+        if not token:
+            return jsonify({'message': 'Token is missing!', 'status': 'error'}), 401
+            
+        try:
+            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
+            
+            # Verify it's a fan token
+            if data.get('user_type') != 'fan':
+                return jsonify({'message': 'Invalid token type!', 'status': 'error'}), 401
+                
+            current_user = db.get_fan_by_username(data['username'])
+            
+            if not current_user:
+                return jsonify({'message': 'User not found!', 'status': 'error'}), 401
+        except jwt.ExpiredSignatureError:
+            return jsonify({'message': 'Token has expired!', 'status': 'error'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'message': 'Invalid token!', 'status': 'error'}), 401
+        except Exception as e:
+            return jsonify({'message': f'Token error: {str(e)}', 'status': 'error'}), 401
+            
+        return f(current_user, *args, **kwargs)
     
+    decorated.__name__ = f.__name__
     return decorated
 
 #-----------------------
-# API Routes
+# API Routes for Influencers
 #-----------------------
 
-# Authentication Routes
-@app.route('/api/auth/register', methods=['POST'])
-@swag_from({
-    'tags': ['Auth'],
-    'description': 'Register a new influencer',
-    'consumes': ['application/json'],
-    'parameters': [
-        {
-            'name': 'body',
-            'in': 'body',
-            'required': True,
-            'schema': {
-                'type': 'object',
-                'properties': {
-                    'username': {'type': 'string', 'example': 'johndoe'},
-                    'email': {'type': 'string', 'example': 'john@example.com'},
-                    'password': {'type': 'string', 'example': 'securepass123'},
-                    'affiliate_id': {'type': 'string', 'example': 'amzn-123456', 'required': False}
-                },
-                'required': ['username', 'email', 'password']
-            }
-        }
-    ],
-    'responses': {
-        '201': {
-            'description': 'User created successfully'
-        },
-        '400': {'description': 'Bad request - invalid input data'},
-        '500': {'description': 'Internal server error'}
-    }
-})
-def register():
+# Authentication Routes for Influencers
+@app.route('/api/auth/influencer/register', methods=['POST'])
+def register_influencer():
     data = request.get_json()
     username = data.get("username")
     email = data.get("email")
     password = data.get("password")
     affiliate_id = data.get("affiliate_id", "")
+    bio = data.get("bio", "")
 
     # Validate input data
     if not username or not email or not password:
@@ -215,7 +178,8 @@ def register():
         "username": username,
         "email": email,
         "password_hash": password_hash,
-        "affiliate_id": affiliate_id if affiliate_id else None
+        "affiliate_id": affiliate_id if affiliate_id else None,
+        "bio": bio if bio else None
     }
 
     new_influencer = db.create_influencer(influencer_data)
@@ -239,39 +203,13 @@ def register():
             "id": new_influencer["id"],
             "username": new_influencer["username"],
             "email": new_influencer["email"],
+            "bio": new_influencer.get("bio", ""),
             "chat_page_url": chat_page_url
         }
     }), 201
 
-@app.route('/api/auth/login', methods=['POST'])
-@swag_from({
-    'tags': ['Auth'],
-    'description': 'Login and get JWT token',
-    'consumes': ['application/json'],
-    'parameters': [
-        {
-            'name': 'body',
-            'in': 'body',
-            'required': True,
-            'schema': {
-                'type': 'object',
-                'properties': {
-                    'username': {'type': 'string', 'example': 'johndoe'},
-                    'password': {'type': 'string', 'example': 'securepass123'}
-                },
-                'required': ['username', 'password']
-            }
-        }
-    ],
-    'responses': {
-        '200': {
-            'description': 'Login successful'
-        },
-        '401': {'description': 'Authentication failed'},
-        '500': {'description': 'Internal server error'}
-    }
-})
-def login():
+@app.route('/api/auth/influencer/login', methods=['POST'])
+def login_influencer():
     try:
         # Get JSON data from request
         data = request.get_json()
@@ -307,6 +245,7 @@ def login():
         token_payload = {
             "username": influencer["username"],
             "id": influencer["id"],
+            "user_type": "influencer",
             "exp": datetime.utcnow() + timedelta(days=30)  # Token expires in 30 days
         }
         token = jwt.encode(token_payload, app.config['SECRET_KEY'], algorithm="HS256")
@@ -318,7 +257,9 @@ def login():
                 "id": influencer["id"],
                 "username": influencer["username"],
                 "email": influencer["email"],
+                "bio": influencer.get("bio", ""),
                 "avatar_id": influencer.get("heygen_avatar_id"),
+                "voice_id": influencer.get("voice_id"),
                 "chat_page_url": f"/chat/{username}",
                 "has_avatar": influencer.get("heygen_avatar_id") is not None,
                 "token": token
@@ -332,30 +273,85 @@ def login():
             "status": "error"
         }), 500
 
+# Profile Management
+@app.route('/api/influencer/profile', methods=['GET'])
+@influencer_token_required
+def get_influencer_profile(current_user):
+    try:
+        bucket_name = "influencer-assets"
+        avatar_path = current_user.get("original_asset_path", "")
+        avatar_preview_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_name}/{avatar_path}" if avatar_path else ""
+        
+        return jsonify({
+            "status": "success",
+            "data": {
+                "id": current_user["id"],
+                "username": current_user["username"],
+                "email": current_user["email"],
+                "bio": current_user.get("bio", ""),
+                "avatar_id": current_user.get("heygen_avatar_id"),
+                "voice_id": current_user.get("voice_id"),
+                "profile_image_url": avatar_preview_url,
+                "chat_page_url": f"/chat/{current_user['username']}",
+                "has_avatar": current_user.get("heygen_avatar_id") is not None
+            }
+        })
+    except Exception as e:
+        logger.error(f"Get profile error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+@app.route('/api/influencer/profile', methods=['PUT'])
+@influencer_token_required
+def update_influencer_profile(current_user):
+    try:
+        data = request.get_json()
+        
+        updates = {}
+        
+        if "bio" in data:
+            updates["bio"] = data["bio"]
+            
+        if "voice_id" in data:
+            updates["voice_id"] = data["voice_id"]
+            
+        if not updates:
+            return jsonify({
+                "message": "No fields to update",
+                "status": "error"
+            }), 400
+            
+        success = db.update_influencer(current_user["id"], updates)
+        
+        if not success:
+            return jsonify({
+                "message": "Failed to update profile",
+                "status": "error"
+            }), 500
+            
+        # Get updated profile data
+        updated_user = db.get_influencer(current_user["id"])
+        
+        return jsonify({
+            "message": "Profile updated successfully",
+            "status": "success",
+            "data": {
+                "bio": updated_user.get("bio", ""),
+                "voice_id": updated_user.get("voice_id")
+            }
+        })
+    except Exception as e:
+        logger.error(f"Update profile error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
 # Avatar Management
 @app.route('/api/avatar/create', methods=['POST'])
-@token_required
-@swag_from({
-    'tags': ['Avatars'],
-    'description': 'Create HeyGen avatar from uploaded media',
-    'consumes': ['multipart/form-data'],
-    'parameters': [
-        {
-            'name': 'file',
-            'in': 'formData',
-            'type': 'file',
-            'required': True,
-            'description': 'Media file for avatar creation'
-        }
-    ],
-    'responses': {
-        '200': {
-            'description': 'Avatar created successfully'
-        },
-        '400': {'description': 'Bad request'},
-        '500': {'description': 'Internal server error'}
-    }
-})
+@influencer_token_required
 def create_avatar(current_user):
     try:
         # 1. Validate request
@@ -392,7 +388,7 @@ def create_avatar(current_user):
             }), 413
 
         # 3. Prepare upload
-        from werkzeug.utils import secure_filename  # Import secure_filename
+        from werkzeug.utils import secure_filename
         safe_filename = secure_filename(file.filename)
         file_path = f"avatars/original_{influencer_id}_{safe_filename}"
         bucket_name = "influencer-assets"
@@ -441,7 +437,7 @@ def create_avatar(current_user):
                 
                 # Process the response
                 response_data = test_response.json()
-                avatars = response_data.get("data", {}).get("avatars", [])  # Adjust based on actual response structure
+                avatars = response_data.get("data", {}).get("avatars", [])
                 
                 if not avatars:
                     logger.error("No avatars available in HeyGen account")
@@ -502,34 +498,7 @@ def create_avatar(current_user):
 
 # Affiliate Management
 @app.route('/api/affiliate', methods=['POST'])
-@token_required
-@swag_from({
-    'tags': ['Affiliate'],
-    'description': 'Add or update affiliate information',
-    'consumes': ['application/json'],
-    'parameters': [
-        {
-            'name': 'body',
-            'in': 'body',
-            'required': True,
-            'schema': {
-                'type': 'object',
-                'properties': {
-                    'platform': {'type': 'string', 'example': 'amazon'},
-                    'affiliate_id': {'type': 'string', 'example': 'amzn-123456'}
-                },
-                'required': ['platform', 'affiliate_id']
-            }
-        }
-    ],
-    'responses': {
-        '200': {
-            'description': 'Affiliate info updated successfully'
-        },
-        '400': {'description': 'Bad request'},
-        '500': {'description': 'Internal server error'}
-    }
-})
+@influencer_token_required
 def add_affiliate(current_user):
     try:
         data = request.get_json()
@@ -568,17 +537,7 @@ def add_affiliate(current_user):
         }), 500
 
 @app.route('/api/affiliate', methods=['GET'])
-@token_required
-@swag_from({
-    'tags': ['Affiliate'],
-    'description': 'Get all affiliate links for the current user',
-    'responses': {
-        '200': {
-            'description': 'List of affiliate links'
-        },
-        '500': {'description': 'Internal server error'}
-    }
-})
+@influencer_token_required
 def get_affiliates(current_user):
     try:
         affiliate_links = db.get_affiliate_links(current_user["id"])
@@ -595,38 +554,262 @@ def get_affiliates(current_user):
             "status": "error"
         }), 500
 
+#-----------------------
+# API Routes for Fans
+#-----------------------
+
+@app.route('/api/auth/fan/register', methods=['POST'])
+def register_fan():
+    data = request.get_json()
+    username = data.get("username")
+    email = data.get("email")
+    password = data.get("password")
+
+    # Validate input data
+    if not username or not email or not password:
+        return jsonify({
+            "message": "Username, email, and password are required",
+            "status": "error"
+        }), 400
+        
+    # Username validation - alphanumeric and underscore only
+    if not username.replace("_", "").isalnum():
+        return jsonify({
+            "message": "Username can only contain letters, numbers, and underscores",
+            "status": "error"
+        }), 400
+        
+    # Hash the password
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+
+    # Check if the username or email already exists
+    if db.get_fan_by_username(username):
+        return jsonify({
+            "message": "Username already exists",
+            "status": "error"
+        }), 400
+    if db.get_fan_by_email(email):
+        return jsonify({
+            "message": "Email already exists",
+            "status": "error"
+        }), 400
+
+    # Create user
+    fan_id = str(uuid.uuid4())
+    fan_data = {
+        "id": fan_id,
+        "username": username,
+        "email": email,
+        "password_hash": password_hash
+    }
+
+    new_fan = db.create_fan(fan_data)
+    if not new_fan:
+        return jsonify({
+            "message": "Failed to create fan account",
+            "status": "error"
+        }), 500
+
+    return jsonify({
+        "message": "Registration successful", 
+        "status": "success",
+        "data": {
+            "id": new_fan["id"],
+            "username": new_fan["username"],
+            "email": new_fan["email"]
+        }
+    }), 201
+
+@app.route('/api/auth/fan/login', methods=['POST'])
+def login_fan():
+    try:
+        # Get JSON data from request
+        data = request.get_json()
+        username = data.get("username")
+        password = data.get("password")
+
+        if not username or not password:
+            return jsonify({
+                "message": "Username and password are required",
+                "status": "error"
+            }), 400
+
+        # Fetch user from database
+        fan = db.get_fan_by_username(username)
+
+        if not fan:
+            return jsonify({
+                "message": "Invalid username or password",
+                "status": "error"
+            }), 401
+
+        # Hash the input password for comparison
+        hashed_input_password = hashlib.sha256(password.encode()).hexdigest()
+
+        # Compare hashed passwords
+        if fan["password_hash"] != hashed_input_password:
+            return jsonify({
+                "message": "Invalid username or password",
+                "status": "error"
+            }), 401
+
+        # Generate JWT token
+        token_payload = {
+            "username": fan["username"],
+            "id": fan["id"],
+            "user_type": "fan",
+            "exp": datetime.utcnow() + timedelta(days=30)  # Token expires in 30 days
+        }
+        token = jwt.encode(token_payload, app.config['SECRET_KEY'], algorithm="HS256")
+
+        return jsonify({
+            "message": "Login successful",
+            "status": "success",
+            "data": {
+                "id": fan["id"],
+                "username": fan["username"],
+                "email": fan["email"],
+                "token": token
+            }
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Fan login error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+# Voice Chat Features
+@app.route('/api/voice/speech-to-text', methods=['POST'])
+def speech_to_text():
+    """Convert speech audio to text using OpenAI Whisper API"""
+    try:
+        if 'audio' not in request.files:
+            return jsonify({
+                "message": "No audio file uploaded",
+                "status": "error"
+            }), 400
+            
+        audio_file = request.files['audio']
+        
+        if audio_file.filename == '':
+            return jsonify({
+                "message": "Empty filename",
+                "status": "error"
+            }), 400
+            
+        # Read the file content
+        audio_content = audio_file.read()
+        
+        # Transcribe using chatbot's transcribe_audio method
+        transcribed_text = chatbot.transcribe_audio(audio_content)
+        
+        if not transcribed_text:
+            return jsonify({
+                "message": "Failed to transcribe audio",
+                "status": "error"
+            }), 500
+            
+        return jsonify({
+            "status": "success",
+            "data": {
+                "text": transcribed_text
+            }
+        })
+    
+    except Exception as e:
+        logger.error(f"Speech to text error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+@app.route('/api/voice/text-to-speech', methods=['POST'])
+def text_to_speech():
+    """Convert text to speech audio using Google TTS"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                "message": "Request must be JSON",
+                "status": "error"
+            }), 400
+            
+        text = data.get("text")
+        voice_name = data.get("voice_name", "en-US-Standard-B")  # Default voice
+        language_code = data.get("language_code", "en-US")  # Default language
+        
+        if not text:
+            return jsonify({
+                "message": "Text is required",
+                "status": "error"
+            }), 400
+            
+        # Generate audio using chatbot's generate_voice_audio method
+        audio_url = chatbot.generate_voice_audio(text, voice_name, language_code)
+        
+        if not audio_url:
+            return jsonify({
+                "message": "Failed to generate audio",
+                "status": "error"
+            }), 500
+            
+        return jsonify({
+            "status": "success",
+            "data": {
+                "audio_url": audio_url
+            }
+        })
+    
+    except Exception as e:
+        logger.error(f"Text to speech error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+@app.route('/api/voice/available-voices', methods=['GET'])
+def get_available_voices():
+    """Get list of available Google TTS voices"""
+    try:
+        # Return a list of standard Google TTS voices
+        voices = [
+            {"voice_name": "en-US-Standard-A", "language_code": "en-US", "gender": "FEMALE"},
+            {"voice_name": "en-US-Standard-B", "language_code": "en-US", "gender": "MALE"},
+            {"voice_name": "en-US-Standard-C", "language_code": "en-US", "gender": "FEMALE"},
+            {"voice_name": "en-US-Standard-D", "language_code": "en-US", "gender": "MALE"},
+            {"voice_name": "en-US-Standard-E", "language_code": "en-US", "gender": "FEMALE"},
+            {"voice_name": "en-US-Standard-F", "language_code": "en-US", "gender": "FEMALE"},
+            {"voice_name": "en-US-Standard-G", "language_code": "en-US", "gender": "FEMALE"},
+            {"voice_name": "en-US-Standard-H", "language_code": "en-US", "gender": "FEMALE"},
+            {"voice_name": "en-US-Standard-I", "language_code": "en-US", "gender": "MALE"},
+            {"voice_name": "en-US-Standard-J", "language_code": "en-US", "gender": "MALE"},
+            {"voice_name": "en-GB-Standard-A", "language_code": "en-GB", "gender": "FEMALE"},
+            {"voice_name": "en-GB-Standard-B", "language_code": "en-GB", "gender": "MALE"},
+            {"voice_name": "en-GB-Standard-C", "language_code": "en-GB", "gender": "FEMALE"},
+            {"voice_name": "en-GB-Standard-D", "language_code": "en-GB", "gender": "MALE"},
+            {"voice_name": "en-GB-Standard-F", "language_code": "en-GB", "gender": "FEMALE"},
+        ]
+        
+        return jsonify({
+            "status": "success",
+            "data": {
+                "voices": voices
+            }
+        })
+    
+    except Exception as e:
+        logger.error(f"Get voices error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
 # Chat Functionality
 @app.route('/api/chat', methods=['POST'])
-@swag_from({
-    'tags': ['Chat'],
-    'description': 'Send a message to the chatbot and get a response with video',
-    'consumes': ['application/json'],
-    'parameters': [
-        {
-            'name': 'body',
-            'in': 'body',
-            'required': True,
-            'schema': {
-                'type': 'object',
-                'properties': {
-                    'message': {'type': 'string', 'example': 'Can you recommend some running shoes?'},
-                    'influencer_id': {'type': 'string', 'example': '123e4567-e89b-12d3-a456-426614174000'}
-                },
-                'required': ['message', 'influencer_id']
-            }
-        }
-    ],
-    'responses': {
-        '200': {
-            'description': 'Chatbot response with video'
-        },
-        '400': {'description': 'Bad request'},
-        '404': {'description': 'Influencer not found'},
-        '500': {'description': 'Internal server error'}
-    }
-})
 def chat_message():
-    """Generate response using Chatbot with optional product recommendations"""
+    """Generate response using Chatbot with optional product recommendations and voice"""
     data = request.get_json()
     if not data:
         return jsonify({
@@ -636,6 +819,8 @@ def chat_message():
     
     user_message = data.get("message", "")
     influencer_id = data.get("influencer_id")
+    fan_id = data.get("fan_id")  # Optional fan ID for conversation tracking
+    voice_mode = data.get("voice_mode", False)  # Default to false if not provided
     
     if not user_message or not influencer_id:
         return jsonify({
@@ -661,24 +846,49 @@ def chat_message():
                 "status": "error"
             }), 400
         
-        # 2. Get response from Chatbot with product recommendations
-        response = chatbot.get_response(user_message, influencer.get("affiliate_id", ""), influencer.get("username"))
+        # 2. Verify fan ID if provided
+        if fan_id:
+            fan = db.get_fan(fan_id)
+            if not fan:
+                return jsonify({
+                    "message": f"Fan not found: {fan_id}",
+                    "status": "error"
+                }), 404
         
-        # 3. Log the interaction
+        # 3. Get response from Chatbot with product recommendations
+        response = chatbot.get_response(
+            user_message, 
+            influencer_id, 
+            fan_id, 
+            influencer.get("username"),
+            voice_mode,
+            influencer.get("voice_id")
+        )
+        
+        # 4. Log the interaction
         db.log_chat_interaction(
             influencer_id, 
             user_message, 
             response["text"], 
-            response["has_product_recommendations"]
+            response["has_product_recommendations"],
+            fan_id
         )
+        
+        # 5. Prepare response data
+        response_data = {
+            "text": response["text"],
+            "video_url": response["video_url"],
+            "has_product_recommendations": response["has_product_recommendations"],
+            "voice_mode": voice_mode
+        }
+        
+        # Add audio URL if voice mode is enabled
+        if voice_mode and "audio_url" in response:
+            response_data["audio_url"] = response["audio_url"]
         
         return jsonify({
             "status": "success",
-            "data": {
-                "text": response["text"],
-                "video_url": response["video_url"],
-                "has_product_recommendations": response["has_product_recommendations"]
-            }
+            "data": response_data
         })
 
     except Exception as e:
@@ -690,25 +900,6 @@ def chat_message():
 
 # Public chat page info
 @app.route('/api/chat/<username>', methods=['GET'])
-@swag_from({
-    'tags': ['Chat'],
-    'description': 'Get public chat page info for an influencer',
-    'parameters': [
-        {
-            'name': 'username',
-            'in': 'path',
-            'type': 'string',
-            'required': True,
-            'description': 'Influencer username'
-        }
-    ],
-    'responses': {
-        '200': {
-            'description': 'Chat page info'
-        },
-        '404': {'description': 'Influencer not found'}
-    }
-})
 def get_public_chat_info(username):
     """Get public chat page info for an influencer"""
     try:
@@ -733,6 +924,9 @@ def get_public_chat_info(username):
         avatar_path = influencer.get("original_asset_path", "")
         avatar_preview_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_name}/{avatar_path}" if avatar_path else ""
         
+        # Check if voice is configured
+        has_voice = influencer.get("voice_id") is not None
+        
         return jsonify({
             "status": "success",
             "data": {
@@ -740,7 +934,11 @@ def get_public_chat_info(username):
                 "influencer_id": influencer["id"],
                 "avatar_preview_url": avatar_preview_url,
                 "avatar_id": influencer["heygen_avatar_id"],
-                "chat_endpoint": "/api/chat"
+                "has_voice": has_voice,
+                "voice_id": influencer.get("voice_id", ""),
+                "bio_snippet": influencer.get("bio", "")[:100] + "..." if influencer.get("bio") and len(influencer.get("bio")) > 100 else influencer.get("bio", ""),
+                "chat_endpoint": "/api/chat",
+                "voice_enabled": True  # Google TTS is always available
             }
         })
     
@@ -751,19 +949,60 @@ def get_public_chat_info(username):
             "status": "error"
         }), 500
 
+# Fan Chat History
+@app.route('/api/fan/chat-history', methods=['GET'])
+@fan_token_required
+def get_fan_chat_history(current_user):
+    """Get chat history for a fan with an influencer"""
+    try:
+        influencer_id = request.args.get('influencer_id')
+        limit = request.args.get('limit', 20)
+        
+        try:
+            limit = int(limit)
+            if limit < 1 or limit > 100:
+                limit = 20  # Default if limit is out of range
+        except ValueError:
+            limit = 20  # Default if limit is not a valid integer
+        
+        if not influencer_id:
+            return jsonify({
+                "message": "influencer_id is required",
+                "status": "error"
+            }), 400
+            
+        # Check if influencer exists
+        influencer = db.get_influencer(influencer_id)
+        if not influencer:
+            return jsonify({
+                "message": f"Influencer not found: {influencer_id}",
+                "status": "error"
+            }), 404
+            
+        # Get chat history
+        chat_history = db.get_chat_history(influencer_id, current_user["id"], limit)
+        
+        return jsonify({
+            "status": "success",
+            "data": {
+                "chat_history": chat_history,
+                "influencer": {
+                    "username": influencer["username"],
+                    "id": influencer["id"]
+                }
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Get fan chat history error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
 # Analytics
 @app.route('/api/analytics/dashboard', methods=['GET'])
-@token_required
-@swag_from({
-    'tags': ['Analytics'],
-    'description': 'Get dashboard data for the influencer',
-    'responses': {
-        '200': {
-            'description': 'Dashboard data'
-        },
-        '500': {'description': 'Internal server error'}
-    }
-})
+@influencer_token_required
 def get_dashboard_data(current_user):
     """Get dashboard data for the influencer"""
     try:
@@ -815,6 +1054,98 @@ def get_dashboard_data(current_user):
             "status": "error"
         }), 500
 
+# VOice Cloning
+@app.route('/api/voice/clone', methods=['POST'])
+@influencer_token_required
+def clone_influencer_voice(current_user):
+    """Create a cloned voice using ElevenLabs Voice Clone API"""
+    try:
+        # Check if files are uploaded
+        if 'audio_samples' not in request.files:
+            return jsonify({
+                "message": "No audio samples uploaded",
+                "status": "error"
+            }), 400
+            
+        # Get multiple audio files
+        audio_files = request.files.getlist('audio_samples')
+        
+        if len(audio_files) == 0 or audio_files[0].filename == '':
+            return jsonify({
+                "message": "No audio samples selected",
+                "status": "error"
+            }), 400
+            
+        # Validate that we have enough audio (ElevenLabs recommends at least 1 minute)
+        if len(audio_files) < 3:  # Arbitrary minimum, adjust as needed
+            return jsonify({
+                "message": "Please upload at least 3 audio samples for better voice cloning",
+                "status": "warning"
+            }), 400
+            
+        # Get name for the voice (use username if not provided)
+        voice_name = request.form.get('voice_name', f"{current_user['username']}'s Voice")
+        description = request.form.get('description', f"Cloned voice for {current_user['username']}")
+        
+        # Read all audio files into memory
+        audio_samples = []
+        for audio_file in audio_files:
+            audio_samples.append(audio_file.read())
+        
+        # Call the chatbot to create the cloned voice
+        voice_id, message = chatbot.create_cloned_voice(voice_name, audio_samples, description)
+        
+        if not voice_id:
+            return jsonify({
+                "message": message,
+                "status": "error"
+            }), 500
+            
+        # Update the influencer record with the new voice ID
+        db.update_influencer(current_user["id"], {"voice_id": voice_id})
+        
+        return jsonify({
+            "message": "Voice cloned successfully",
+            "status": "success",
+            "data": {
+                "voice_id": voice_id,
+                "voice_name": voice_name
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Voice cloning error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+@app.route('/api/voice/available', methods=['GET'])
+def get_available_voices():
+    """Get list of available voices from ElevenLabs"""
+    try:
+        voices = chatbot.get_available_voices()
+        
+        if not voices:
+            return jsonify({
+                "message": "No voices available or ElevenLabs API error",
+                "status": "error"
+            }), 500
+            
+        return jsonify({
+            "status": "success",
+            "data": {
+                "voices": voices
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Get voices error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+        
 # Main Application Entry
 if __name__ == "__main__":
     # Make sure all required environment variables are set
@@ -825,5 +1156,5 @@ if __name__ == "__main__":
         print(f"Error: Missing required environment variables: {', '.join(missing_vars)}")
         exit(1)
         
-    port = int(os.getenv("PORT", 8081))
+    port = int(os.getenv("PORT", 8000))
     app.run(host="0.0.0.0", port=port)

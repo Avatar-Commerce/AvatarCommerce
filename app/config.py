@@ -11,4 +11,5 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "default-secret-key")  # Add this line
 SUPABASE_SERVICE_ROLE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+ELEVEN_LABS_API_KEY = os.getenv("ELEVEN_LABS_API_KEY") 
 
