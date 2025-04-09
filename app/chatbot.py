@@ -409,24 +409,31 @@ class Chatbot:
             print("OpenAI API key not configured")
             return None
             
+        temp_file = None
+        temp_filename = None
+        
         try:
             # Use temporary file if audio_file is bytes
             if isinstance(audio_file, bytes):
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
-                    temp_file.write(audio_file)
-                    audio_path = temp_file.name
+                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
+                temp_filename = temp_file.name
+                temp_file.write(audio_file)
+                temp_file.close()  # Close the file explicitly before using it
+                audio_path = temp_filename
             else:
                 audio_path = audio_file
                 
-            files = {'file': open(audio_path, 'rb')}
-            headers = {'Authorization': f'Bearer {OPENAI_API_KEY}'}
-            
-            response = requests.post(
-                'https://api.openai.com/v1/audio/transcriptions',
-                headers=headers,
-                files=files,
-                data={'model': 'whisper-1'}
-            )
+            # Create a file object for the request
+            with open(audio_path, 'rb') as file_obj:
+                files = {'file': file_obj}
+                headers = {'Authorization': f'Bearer {OPENAI_API_KEY}'}
+                
+                response = requests.post(
+                    'https://api.openai.com/v1/audio/transcriptions',
+                    headers=headers,
+                    files=files,
+                    data={'model': 'whisper-1'}
+                )
             
             if response.status_code == 200:
                 result = response.json()
@@ -439,6 +446,16 @@ class Chatbot:
             return None
         finally:
             # Clean up temporary file if we created one
-            if isinstance(audio_file, bytes) and 'audio_path' in locals():
-                import os
-                os.unlink(audio_path)
+            if temp_filename:
+                try:
+                    # Add a small delay to ensure file is released
+                    import time
+                    time.sleep(0.1)
+                    
+                    # Then try to remove it
+                    import os
+                    if os.path.exists(temp_filename):
+                        os.remove(temp_filename)
+                except Exception as e:
+                    print(f"Warning: Could not remove temporary file {temp_filename}: {str(e)}")
+                    # Continue execution even if cleanup fails

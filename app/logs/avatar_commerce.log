@@ -73,3 +73,8 @@ KeyError: 0
  [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:482]
 2025-04-05 10:22:46,381 INFO: Attempting to connect to HeyGen API... [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:419]
 2025-04-05 10:23:12,941 INFO: Using HeyGen avatar: 0019574bacd74bd9a2cb76ac19bfb773 [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:459]
+2025-04-09 10:44:47,242 INFO: Attempting to connect to HeyGen API... [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:415]
+2025-04-09 10:45:18,995 INFO: Using HeyGen avatar: 0019574bacd74bd9a2cb76ac19bfb773 [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:455]
+2025-04-09 10:52:14,848 ERROR: Speech to text error: [WinError 32] The process cannot access the file because it is being used by another process: 'C:\\Users\\ELITEB~1\\AppData\\Local\\Temp\\tmp2gfypx8i.mp3' [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:722]
+2025-04-09 10:57:31,494 ERROR: Text to speech error: Chatbot.generate_voice_audio() takes from 2 to 3 positional arguments but 4 were given [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:766]
+2025-04-09 11:01:01,014 ERROR: Text to speech error: 'Chatbot' object has no attribute 'generate_voice_audio' [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:766]

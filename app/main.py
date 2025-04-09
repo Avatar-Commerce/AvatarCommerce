@@ -727,7 +727,7 @@ def speech_to_text():
 
 @app.route('/api/voice/text-to-speech', methods=['POST'])
 def text_to_speech():
-    """Convert text to speech audio using Google TTS"""
+    """Convert text to speech audio using ElevenLabs API"""
     try:
         data = request.get_json()
         if not data:
@@ -737,8 +737,8 @@ def text_to_speech():
             }), 400
             
         text = data.get("text")
-        voice_name = data.get("voice_name", "en-US-Standard-B")  # Default voice
-        language_code = data.get("language_code", "en-US")  # Default language
+        # Use voice_id instead of voice_name
+        voice_id = data.get("voice_id", "21m00Tcm4TlvDq8ikWAM")  # Default ElevenLabs voice ID
         
         if not text:
             return jsonify({
@@ -746,8 +746,8 @@ def text_to_speech():
                 "status": "error"
             }), 400
             
-        # Generate audio using chatbot's generate_voice_audio method
-        audio_url = chatbot.generate_voice_audio(text, voice_name, language_code)
+        # Generate audio using chatbot's generate_voice_audio method with the correct parameter
+        audio_url = chatbot.generate_voice_audio(text, voice_id)
         
         if not audio_url:
             return jsonify({
@@ -769,29 +769,84 @@ def text_to_speech():
             "status": "error"
         }), 500
 
+@app.route('/api/voice/clone', methods=['POST'])
+@influencer_token_required
+def clone_influencer_voice(current_user):
+    """Create a cloned voice using ElevenLabs Voice Clone API"""
+    try:
+        # Check if files are uploaded
+        if 'audio_samples' not in request.files:
+            return jsonify({
+                "message": "No audio samples uploaded",
+                "status": "error"
+            }), 400
+            
+        # Get multiple audio files
+        audio_files = request.files.getlist('audio_samples')
+        
+        if len(audio_files) == 0 or audio_files[0].filename == '':
+            return jsonify({
+                "message": "No audio samples selected",
+                "status": "error"
+            }), 400
+            
+        # Validate that we have enough audio (ElevenLabs recommends at least 1 minute)
+        if len(audio_files) < 3:  # Arbitrary minimum, adjust as needed
+            return jsonify({
+                "message": "Please upload at least 3 audio samples for better voice cloning",
+                "status": "warning"
+            }), 400
+            
+        # Get name for the voice (use username if not provided)
+        voice_name = request.form.get('voice_name', f"{current_user['username']}'s Voice")
+        description = request.form.get('description', f"Cloned voice for {current_user['username']}")
+        
+        # Read all audio files into memory
+        audio_samples = []
+        for audio_file in audio_files:
+            audio_samples.append(audio_file.read())
+        
+        # Call the chatbot to create the cloned voice
+        voice_id, message = chatbot.create_cloned_voice(voice_name, audio_samples, description)
+        
+        if not voice_id:
+            return jsonify({
+                "message": message,
+                "status": "error"
+            }), 500
+            
+        # Update the influencer record with the new voice ID
+        db.update_influencer(current_user["id"], {"voice_id": voice_id})
+        
+        return jsonify({
+            "message": "Voice cloned successfully",
+            "status": "success",
+            "data": {
+                "voice_id": voice_id,
+                "voice_name": voice_name
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Voice cloning error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
 @app.route('/api/voice/available-voices', methods=['GET'])
 def get_available_voices():
-    """Get list of available Google TTS voices"""
+    """Get list of available ElevenLabs voices"""
     try:
-        # Return a list of standard Google TTS voices
-        voices = [
-            {"voice_name": "en-US-Standard-A", "language_code": "en-US", "gender": "FEMALE"},
-            {"voice_name": "en-US-Standard-B", "language_code": "en-US", "gender": "MALE"},
-            {"voice_name": "en-US-Standard-C", "language_code": "en-US", "gender": "FEMALE"},
-            {"voice_name": "en-US-Standard-D", "language_code": "en-US", "gender": "MALE"},
-            {"voice_name": "en-US-Standard-E", "language_code": "en-US", "gender": "FEMALE"},
-            {"voice_name": "en-US-Standard-F", "language_code": "en-US", "gender": "FEMALE"},
-            {"voice_name": "en-US-Standard-G", "language_code": "en-US", "gender": "FEMALE"},
-            {"voice_name": "en-US-Standard-H", "language_code": "en-US", "gender": "FEMALE"},
-            {"voice_name": "en-US-Standard-I", "language_code": "en-US", "gender": "MALE"},
-            {"voice_name": "en-US-Standard-J", "language_code": "en-US", "gender": "MALE"},
-            {"voice_name": "en-GB-Standard-A", "language_code": "en-GB", "gender": "FEMALE"},
-            {"voice_name": "en-GB-Standard-B", "language_code": "en-GB", "gender": "MALE"},
-            {"voice_name": "en-GB-Standard-C", "language_code": "en-GB", "gender": "FEMALE"},
-            {"voice_name": "en-GB-Standard-D", "language_code": "en-GB", "gender": "MALE"},
-            {"voice_name": "en-GB-Standard-F", "language_code": "en-GB", "gender": "FEMALE"},
-        ]
+        # Call the chatbot's method to get ElevenLabs voices
+        voices = chatbot.get_available_voices()
         
+        if not voices:
+            return jsonify({
+                "message": "Failed to retrieve voices from ElevenLabs",
+                "status": "error"
+            }), 500
+            
         return jsonify({
             "status": "success",
             "data": {
@@ -805,7 +860,7 @@ def get_available_voices():
             "message": str(e),
             "status": "error"
         }), 500
-
+        
 # Chat Functionality
 @app.route('/api/chat', methods=['POST'])
 def chat_message():
@@ -1054,98 +1109,6 @@ def get_dashboard_data(current_user):
             "status": "error"
         }), 500
 
-# VOice Cloning
-@app.route('/api/voice/clone', methods=['POST'])
-@influencer_token_required
-def clone_influencer_voice(current_user):
-    """Create a cloned voice using ElevenLabs Voice Clone API"""
-    try:
-        # Check if files are uploaded
-        if 'audio_samples' not in request.files:
-            return jsonify({
-                "message": "No audio samples uploaded",
-                "status": "error"
-            }), 400
-            
-        # Get multiple audio files
-        audio_files = request.files.getlist('audio_samples')
-        
-        if len(audio_files) == 0 or audio_files[0].filename == '':
-            return jsonify({
-                "message": "No audio samples selected",
-                "status": "error"
-            }), 400
-            
-        # Validate that we have enough audio (ElevenLabs recommends at least 1 minute)
-        if len(audio_files) < 3:  # Arbitrary minimum, adjust as needed
-            return jsonify({
-                "message": "Please upload at least 3 audio samples for better voice cloning",
-                "status": "warning"
-            }), 400
-            
-        # Get name for the voice (use username if not provided)
-        voice_name = request.form.get('voice_name', f"{current_user['username']}'s Voice")
-        description = request.form.get('description', f"Cloned voice for {current_user['username']}")
-        
-        # Read all audio files into memory
-        audio_samples = []
-        for audio_file in audio_files:
-            audio_samples.append(audio_file.read())
-        
-        # Call the chatbot to create the cloned voice
-        voice_id, message = chatbot.create_cloned_voice(voice_name, audio_samples, description)
-        
-        if not voice_id:
-            return jsonify({
-                "message": message,
-                "status": "error"
-            }), 500
-            
-        # Update the influencer record with the new voice ID
-        db.update_influencer(current_user["id"], {"voice_id": voice_id})
-        
-        return jsonify({
-            "message": "Voice cloned successfully",
-            "status": "success",
-            "data": {
-                "voice_id": voice_id,
-                "voice_name": voice_name
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"Voice cloning error: {str(e)}")
-        return jsonify({
-            "message": str(e),
-            "status": "error"
-        }), 500
-
-@app.route('/api/voice/available', methods=['GET'])
-def get_available_voices():
-    """Get list of available voices from ElevenLabs"""
-    try:
-        voices = chatbot.get_available_voices()
-        
-        if not voices:
-            return jsonify({
-                "message": "No voices available or ElevenLabs API error",
-                "status": "error"
-            }), 500
-            
-        return jsonify({
-            "status": "success",
-            "data": {
-                "voices": voices
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"Get voices error: {str(e)}")
-        return jsonify({
-            "message": str(e),
-            "status": "error"
-        }), 500
-        
 # Main Application Entry
 if __name__ == "__main__":
     # Make sure all required environment variables are set

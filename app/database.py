@@ -18,101 +18,91 @@ class Database:
         self.initialize_tables()
 
     def initialize_tables(self):
-        """Create tables if they don't exist"""
+        """Create tables if they don't exist using standard REST API"""
+        # Check and create tables if needed
+
+        # 1. Check if influencers table exists
         try:
-            # Check if influencers table exists
             self.supabase.table("influencers").select("*").limit(1).execute()
+            logger.info("Influencers table exists")
         except Exception as e:
-            # If table doesn't exist, create it
-            try:
-                self.supabase.rpc('execute_sql', {
-                    'sql': """
-                    CREATE TABLE influencers (
-                        id TEXT PRIMARY KEY,
-                        username TEXT UNIQUE NOT NULL,
-                        email TEXT UNIQUE NOT NULL,
-                        password_hash TEXT NOT NULL,
-                        heygen_avatar_id TEXT,
-                        original_asset_path TEXT,
-                        voice_id TEXT DEFAULT 'default_voice',
-                        affiliate_id TEXT,
-                        chat_page_url TEXT,
-                        bio TEXT,
-                        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                    );
-                    """
-                }).execute()
-            except Exception as create_error:
-                logger.error(f"Influencers table creation failed: {str(create_error)}")
+            logger.error(f"Influencers table doesn't exist: {str(e)}")
+            print("Please create the 'influencers' table manually in Supabase dashboard with the following schema:")
+            print("""
+            CREATE TABLE influencers (
+                id TEXT PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                heygen_avatar_id TEXT,
+                original_asset_path TEXT,
+                voice_id TEXT DEFAULT 'default_voice',
+                affiliate_id TEXT,
+                chat_page_url TEXT,
+                bio TEXT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+            """)
         
+        # 2. Check if fans table exists
         try:
-            # Check if fans table exists
             self.supabase.table("fans").select("*").limit(1).execute()
+            logger.info("Fans table exists")
         except Exception as e:
-            # If table doesn't exist, create it
-            try:
-                self.supabase.rpc('execute_sql', {
-                    'sql': """
-                    CREATE TABLE fans (
-                        id TEXT PRIMARY KEY,
-                        username TEXT UNIQUE NOT NULL,
-                        email TEXT UNIQUE NOT NULL,
-                        password_hash TEXT NOT NULL,
-                        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                    );
-                    """
-                }).execute()
-            except Exception as create_error:
-                logger.error(f"Fans table creation failed: {str(create_error)}")
+            logger.error(f"Fans table doesn't exist: {str(e)}")
+            print("Please create the 'fans' table manually in Supabase dashboard with the following schema:")
+            print("""
+            CREATE TABLE fans (
+                id TEXT PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+            """)
         
+        # 3. Check if affiliate_links table exists
         try:
-            # Check if affiliate_links table exists
             self.supabase.table("affiliate_links").select("*").limit(1).execute()
+            logger.info("Affiliate links table exists")
         except Exception as e:
-            # If table doesn't exist, create it
-            try:
-                self.supabase.rpc('execute_sql', {
-                    'sql': """
-                    CREATE TABLE affiliate_links (
-                        id TEXT PRIMARY KEY,
-                        influencer_id TEXT NOT NULL,
-                        platform TEXT NOT NULL,
-                        affiliate_id TEXT NOT NULL,
-                        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                        FOREIGN KEY (influencer_id) REFERENCES influencers(id) ON DELETE CASCADE
-                    );
-                    """
-                }).execute()
-            except Exception as create_error:
-                logger.error(f"Affiliate links table creation failed: {str(create_error)}")
-                
+            logger.error(f"Affiliate links table doesn't exist: {str(e)}")
+            print("Please create the 'affiliate_links' table manually in Supabase dashboard with the following schema:")
+            print("""
+            CREATE TABLE affiliate_links (
+                id TEXT PRIMARY KEY,
+                influencer_id TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                affiliate_id TEXT NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                FOREIGN KEY (influencer_id) REFERENCES influencers(id) ON DELETE CASCADE
+            );
+            """)
+        
+        # 4. Check if chat_interactions table exists
         try:
-            # Check if chat_interactions table exists
             self.supabase.table("chat_interactions").select("*").limit(1).execute()
+            logger.info("Chat interactions table exists")
         except Exception as e:
-            # If table doesn't exist, create it
-            try:
-                self.supabase.rpc('execute_sql', {
-                    'sql': """
-                    CREATE TABLE chat_interactions (
-                        id TEXT PRIMARY KEY,
-                        influencer_id TEXT NOT NULL,
-                        fan_id TEXT,
-                        user_message TEXT NOT NULL,
-                        bot_response TEXT NOT NULL,
-                        product_recommendations BOOLEAN DEFAULT FALSE,
-                        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                        FOREIGN KEY (influencer_id) REFERENCES influencers(id) ON DELETE CASCADE,
-                        FOREIGN KEY (fan_id) REFERENCES fans(id) ON DELETE SET NULL
-                    );
-                    """
-                }).execute()
-            except Exception as create_error:
-                logger.error(f"Chat interactions table creation failed: {str(create_error)}")
-    
+            logger.error(f"Chat interactions table doesn't exist: {str(e)}")
+            print("Please create the 'chat_interactions' table manually in Supabase dashboard with the following schema:")
+            print("""
+            CREATE TABLE chat_interactions (
+                id TEXT PRIMARY KEY,
+                influencer_id TEXT NOT NULL,
+                fan_id TEXT,
+                user_message TEXT NOT NULL,
+                bot_response TEXT NOT NULL,
+                product_recommendations BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                FOREIGN KEY (influencer_id) REFERENCES influencers(id) ON DELETE CASCADE,
+                FOREIGN KEY (fan_id) REFERENCES fans(id) ON DELETE SET NULL
+            );
+            """)
+        
     # Fan management methods
     def create_fan(self, fan_data: Dict) -> Optional[Dict]:
         """Create a new fan account"""
