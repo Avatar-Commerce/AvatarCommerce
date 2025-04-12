@@ -297,7 +297,14 @@ class Chatbot:
                     audio_base64 = base64.b64encode(audio_content).decode('utf-8')
                 
                 # Clean up
-                os.remove(temp_filename)
+                try:
+                    import time
+                    time.sleep(0.1)
+                    import os
+                    if os.path.exists(temp_filename):
+                        os.remove(temp_filename)
+                except Exception as e:
+                    print(f"Warning: Could not remove temporary file: {str(e)}")
                 
                 return f"data:audio/mpeg;base64,{audio_base64}"
             else:
