@@ -19,89 +19,347 @@ class Database:
 
     def initialize_tables(self):
         """Create tables if they don't exist using standard REST API"""
-        # Check and create tables if needed
-
-        # 1. Check if influencers table exists
-        try:
-            self.supabase.table("influencers").select("*").limit(1).execute()
-            logger.info("Influencers table exists")
-        except Exception as e:
-            logger.error(f"Influencers table doesn't exist: {str(e)}")
-            print("Please create the 'influencers' table manually in Supabase dashboard with the following schema:")
-            print("""
-            CREATE TABLE influencers (
-                id TEXT PRIMARY KEY,
-                username TEXT UNIQUE NOT NULL,
-                email TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                heygen_avatar_id TEXT,
-                original_asset_path TEXT,
-                voice_id TEXT DEFAULT 'default_voice',
-                affiliate_id TEXT,
-                chat_page_url TEXT,
-                bio TEXT,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            );
-            """)
+        # Existing code here...
         
-        # 2. Check if fans table exists
+        # 5. Check if influencer_promotion_settings table exists
         try:
-            self.supabase.table("fans").select("*").limit(1).execute()
-            logger.info("Fans table exists")
+            self.supabase.table("influencer_promotion_settings").select("*").limit(1).execute()
+            logger.info("Influencer promotion settings table exists")
         except Exception as e:
-            logger.error(f"Fans table doesn't exist: {str(e)}")
-            print("Please create the 'fans' table manually in Supabase dashboard with the following schema:")
+            logger.error(f"Influencer promotion settings table doesn't exist: {str(e)}")
+            print("Please create the 'influencer_promotion_settings' table manually in Supabase dashboard with the following schema:")
             print("""
-            CREATE TABLE fans (
-                id TEXT PRIMARY KEY,
-                username TEXT UNIQUE NOT NULL,
-                email TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            );
-            """)
-        
-        # 3. Check if affiliate_links table exists
-        try:
-            self.supabase.table("affiliate_links").select("*").limit(1).execute()
-            logger.info("Affiliate links table exists")
-        except Exception as e:
-            logger.error(f"Affiliate links table doesn't exist: {str(e)}")
-            print("Please create the 'affiliate_links' table manually in Supabase dashboard with the following schema:")
-            print("""
-            CREATE TABLE affiliate_links (
+            CREATE TABLE influencer_promotion_settings (
                 id TEXT PRIMARY KEY,
                 influencer_id TEXT NOT NULL,
-                platform TEXT NOT NULL,
-                affiliate_id TEXT NOT NULL,
+                promotion_frequency INTEGER NOT NULL DEFAULT 3,
+                promote_at_end BOOLEAN NOT NULL DEFAULT FALSE,
+                default_product TEXT,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 FOREIGN KEY (influencer_id) REFERENCES influencers(id) ON DELETE CASCADE
             );
             """)
         
-        # 4. Check if chat_interactions table exists
+        # 6. Check if conversation_counters table exists
         try:
-            self.supabase.table("chat_interactions").select("*").limit(1).execute()
-            logger.info("Chat interactions table exists")
+            self.supabase.table("conversation_counters").select("*").limit(1).execute()
+            logger.info("Conversation counters table exists")
         except Exception as e:
-            logger.error(f"Chat interactions table doesn't exist: {str(e)}")
-            print("Please create the 'chat_interactions' table manually in Supabase dashboard with the following schema:")
+            logger.error(f"Conversation counters table doesn't exist: {str(e)}")
+            print("Please create the 'conversation_counters' table manually in Supabase dashboard with the following schema:")
             print("""
-            CREATE TABLE chat_interactions (
+            CREATE TABLE conversation_counters (
                 id TEXT PRIMARY KEY,
                 influencer_id TEXT NOT NULL,
-                fan_id TEXT,
-                user_message TEXT NOT NULL,
-                bot_response TEXT NOT NULL,
-                product_recommendations BOOLEAN DEFAULT FALSE,
+                fan_id TEXT NOT NULL,
+                message_count INTEGER NOT NULL DEFAULT 0,
+                last_promotion_at TIMESTAMP WITH TIME ZONE,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 FOREIGN KEY (influencer_id) REFERENCES influencers(id) ON DELETE CASCADE,
-                FOREIGN KEY (fan_id) REFERENCES fans(id) ON DELETE SET NULL
+                FOREIGN KEY (fan_id) REFERENCES fans(id) ON DELETE CASCADE,
+                UNIQUE(influencer_id, fan_id)
             );
             """)
+        
+        # 7. Check if influencer_products table exists
+        try:
+            self.supabase.table("influencer_products").select("*").limit(1).execute()
+            logger.info("Influencer products table exists")
+        except Exception as e:
+            logger.error(f"Influencer products table doesn't exist: {str(e)}")
+            print("Please create the 'influencer_products' table manually in Supabase dashboard with the following schema:")
+            print("""
+            CREATE TABLE influencer_products (
+                id TEXT PRIMARY KEY,
+                influencer_id TEXT NOT NULL,
+                product_name TEXT NOT NULL,
+                product_query TEXT NOT NULL,
+                is_default BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                FOREIGN KEY (influencer_id) REFERENCES influencers(id) ON DELETE CASCADE
+            );
+            """)
+
+    # Promotion Settings Methods
+    def get_promotion_settings(self, influencer_id: str) -> Optional[Dict]:
+        """Get promotion settings for an influencer"""
+        try:
+            response = self.supabase.table('influencer_promotion_settings') \
+                .select('*') \
+                .eq('influencer_id', influencer_id) \
+                .execute()
+            
+            # Return the first result or create default settings if none exist
+            if response.data:
+                return response.data[0]
+            else:
+                # Create default settings
+                settings_id = str(uuid.uuid4())
+                settings = {
+                    "id": settings_id,
+                    "influencer_id": influencer_id,
+                    "promotion_frequency": 3,  # Default: promote every 3 messages
+                    "promote_at_end": False,   # Default: don't promote at the end of every message
+                    "default_product": None    # No default product
+                }
+                
+                create_response = self.supabase.table('influencer_promotion_settings').insert(settings).execute()
+                return create_response.data[0] if create_response.data else settings
+                
+        except Exception as e:
+            logger.error(f"Error getting promotion settings: {str(e)}")
+            # Return default settings if error
+            return {
+                "promotion_frequency": 3,
+                "promote_at_end": False,
+                "default_product": None
+            }
+
+    def update_promotion_settings(self, influencer_id: str, settings: Dict) -> bool:
+        """Update promotion settings for an influencer"""
+        try:
+            # Get current settings or create if don't exist
+            current_settings = self.get_promotion_settings(influencer_id)
+            settings_id = current_settings.get("id")
+            
+            if settings_id:
+                # Update existing settings
+                settings['updated_at'] = 'now()'
+                response = self.supabase.table('influencer_promotion_settings') \
+                    .update(settings) \
+                    .eq('id', settings_id) \
+                    .execute()
+            else:
+                # Create new settings
+                settings_id = str(uuid.uuid4())
+                settings["id"] = settings_id
+                settings["influencer_id"] = influencer_id
+                response = self.supabase.table('influencer_promotion_settings').insert(settings).execute()
+                
+            return True
+        except Exception as e:
+            logger.error(f"Error updating promotion settings: {str(e)}")
+            return False
+
+    # Conversation Counter Methods
+    def get_conversation_counter(self, influencer_id: str, fan_id: str) -> Optional[Dict]:
+        """Get the conversation counter between an influencer and fan"""
+        try:
+            response = self.supabase.table('conversation_counters') \
+                .select('*') \
+                .eq('influencer_id', influencer_id) \
+                .eq('fan_id', fan_id) \
+                .execute()
+                
+            if response.data:
+                return response.data[0]
+            else:
+                # Create new counter
+                counter_id = str(uuid.uuid4())
+                counter = {
+                    "id": counter_id,
+                    "influencer_id": influencer_id,
+                    "fan_id": fan_id,
+                    "message_count": 0,
+                    "last_promotion_at": None
+                }
+                
+                create_response = self.supabase.table('conversation_counters').insert(counter).execute()
+                return create_response.data[0] if create_response.data else counter
+                
+        except Exception as e:
+            logger.error(f"Error getting conversation counter: {str(e)}")
+            # Return default counter if error
+            return {
+                "message_count": 0,
+                "last_promotion_at": None
+            }
+
+    def increment_conversation_counter(self, influencer_id: str, fan_id: str, was_promotion: bool = False) -> Optional[Dict]:
+        """Increment the conversation counter and update last promotion time if needed"""
+        try:
+            # Get current counter
+            counter = self.get_conversation_counter(influencer_id, fan_id)
+            counter_id = counter.get("id")
+            
+            updates = {
+                "message_count": counter.get("message_count", 0) + 1,
+                "updated_at": 'now()'
+            }
+            
+            if was_promotion:
+                updates["last_promotion_at"] = 'now()'
+            
+            if counter_id:
+                # Update existing counter
+                response = self.supabase.table('conversation_counters') \
+                    .update(updates) \
+                    .eq('id', counter_id) \
+                    .execute()
+                    
+                if response.data:
+                    return response.data[0]
+            else:
+                # Create new counter
+                counter_id = str(uuid.uuid4())
+                counter = {
+                    "id": counter_id,
+                    "influencer_id": influencer_id,
+                    "fan_id": fan_id,
+                    "message_count": 1,
+                    "last_promotion_at": 'now()' if was_promotion else None
+                }
+                
+                create_response = self.supabase.table('conversation_counters').insert(counter).execute()
+                if create_response.data:
+                    return create_response.data[0]
+            
+            # If we reach here, something went wrong, so check the counter again
+            return self.get_conversation_counter(influencer_id, fan_id)
+                
+        except Exception as e:
+            logger.error(f"Error incrementing conversation counter: {str(e)}")
+            return None
+
+    def reset_conversation_counter(self, influencer_id: str, fan_id: str) -> bool:
+        """Reset the conversation counter between an influencer and fan"""
+        try:
+            # Get current counter
+            counter = self.get_conversation_counter(influencer_id, fan_id)
+            counter_id = counter.get("id")
+            
+            if counter_id:
+                # Update existing counter
+                updates = {
+                    "message_count": 0,
+                    "last_promotion_at": None,
+                    "updated_at": 'now()'
+                }
+                
+                self.supabase.table('conversation_counters') \
+                    .update(updates) \
+                    .eq('id', counter_id) \
+                    .execute()
+                    
+            return True
+        except Exception as e:
+            logger.error(f"Error resetting conversation counter: {str(e)}")
+            return False
+
+    # Influencer Products Methods
+    def add_influencer_product(self, influencer_id: str, product_name: str, product_query: str, is_default: bool = False) -> Optional[Dict]:
+        """Add a product for an influencer to promote"""
+        try:
+            # If this is the default product, unset any existing default
+            if is_default:
+                self.supabase.table('influencer_products') \
+                    .update({"is_default": False, "updated_at": 'now()'}) \
+                    .eq('influencer_id', influencer_id) \
+                    .eq('is_default', True) \
+                    .execute()
+                    
+                # Also update the promotion settings
+                self.update_promotion_settings(influencer_id, {"default_product": product_query})
+            
+            # Create new product
+            product_id = str(uuid.uuid4())
+            product = {
+                "id": product_id,
+                "influencer_id": influencer_id,
+                "product_name": product_name,
+                "product_query": product_query,
+                "is_default": is_default
+            }
+            
+            response = self.supabase.table('influencer_products').insert(product).execute()
+            return response.data[0] if response.data else None
+                
+        except Exception as e:
+            logger.error(f"Error adding influencer product: {str(e)}")
+            return None
+
+    def get_influencer_products(self, influencer_id: str) -> List[Dict]:
+        """Get all products for an influencer"""
+        try:
+            response = self.supabase.table('influencer_products') \
+                .select('*') \
+                .eq('influencer_id', influencer_id) \
+                .execute()
+                
+            return response.data if response.data else []
+                
+        except Exception as e:
+            logger.error(f"Error getting influencer products: {str(e)}")
+            return []
+
+    def get_default_product(self, influencer_id: str) -> Optional[Dict]:
+        """Get the default product for an influencer"""
+        try:
+            response = self.supabase.table('influencer_products') \
+                .select('*') \
+                .eq('influencer_id', influencer_id) \
+                .eq('is_default', True) \
+                .execute()
+                
+            return response.data[0] if response.data else None
+                
+        except Exception as e:
+            logger.error(f"Error getting default product: {str(e)}")
+            return None
+
+    def delete_influencer_product(self, product_id: str) -> bool:
+        """Delete a product"""
+        try:
+            self.supabase.table('influencer_products') \
+                .delete() \
+                .eq('id', product_id) \
+                .execute()
+                
+            return True
+                
+        except Exception as e:
+            logger.error(f"Error deleting influencer product: {str(e)}")
+            return False
+
+    def set_default_product(self, product_id: str) -> bool:
+        """Set a product as the default"""
+        try:
+            # Get the product to check influencer_id
+            response = self.supabase.table('influencer_products') \
+                .select('*') \
+                .eq('id', product_id) \
+                .execute()
+                
+            if not response.data:
+                return False
+                
+            product = response.data[0]
+            influencer_id = product.get("influencer_id")
+            
+            # Unset any existing default
+            self.supabase.table('influencer_products') \
+                .update({"is_default": False, "updated_at": 'now()'}) \
+                .eq('influencer_id', influencer_id) \
+                .eq('is_default', True) \
+                .execute()
+                
+            # Set the new default
+            self.supabase.table('influencer_products') \
+                .update({"is_default": True, "updated_at": 'now()'}) \
+                .eq('id', product_id) \
+                .execute()
+                
+            # Update the promotion settings
+            self.update_promotion_settings(influencer_id, {"default_product": product.get("product_query")})
+                
+            return True
+                
+        except Exception as e:
+            logger.error(f"Error setting default product: {str(e)}")
+            return False
         
     # Fan management methods
     def create_fan(self, fan_data: Dict) -> Optional[Dict]:
@@ -321,8 +579,8 @@ class Database:
             
     # Chat interaction methods
     def log_chat_interaction(self, influencer_id: str, user_message: str, 
-                             bot_response: str, product_recommendations: bool,
-                             fan_id: Optional[str] = None) -> Optional[Dict]:
+                            bot_response: str, product_recommendations: bool,
+                            fan_id: Optional[str] = None) -> Optional[Dict]:
         """Log a chat interaction"""
         try:
             interaction_data = {

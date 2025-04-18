@@ -466,3 +466,106 @@ class Chatbot:
                 except Exception as e:
                     print(f"Warning: Could not remove temporary file {temp_filename}: {str(e)}")
                     # Continue execution even if cleanup fails
+    
+    def should_promote_product(self, influencer_id, fan_id):
+        """Determine if it's time to promote a product based on conversation counter and settings"""
+        if not self.db or not fan_id:
+            return False
+            
+        # Get promotion settings
+        settings = self.db.get_promotion_settings(influencer_id)
+        if not settings:
+            return False
+            
+        # If always promote at end is enabled, return True
+        if settings.get("promote_at_end", False):
+            return True
+            
+        # Get conversation counter
+        counter = self.db.get_conversation_counter(influencer_id, fan_id)
+        if not counter:
+            return False
+            
+        # Check if we've reached the promotion frequency
+        message_count = counter.get("message_count", 0)
+        promotion_frequency = settings.get("promotion_frequency", 3)
+        
+        # Check if we've reached the frequency threshold (after incrementing counter)
+        return (message_count + 1) % promotion_frequency == 0
+
+    def get_product_query_for_promotion(self, influencer_id):
+        """Get the query to use for product promotion"""
+        if not self.db:
+            return None
+            
+        # Check for default product in settings
+        settings = self.db.get_promotion_settings(influencer_id)
+        if settings and settings.get("default_product"):
+            return settings.get("default_product")
+            
+        # Check for default product in products table
+        default_product = self.db.get_default_product(influencer_id)
+        if default_product:
+            return default_product.get("product_query")
+            
+        # No default product, return None
+        return None
+
+    def get_response(self, message, influencer_id, fan_id=None, influencer_name=None, voice_mode=False, voice_id=None):
+        """Generate a response with optional product recommendations and voice."""
+        # Check if the message indicates product interest
+        is_product_query, product_query = self.analyze_message_for_product_intent(message)
+        
+        # Determine if we should promote a product based on conversation settings
+        should_promote = False
+        if fan_id and self.db:
+            should_promote = self.should_promote_product(influencer_id, fan_id)
+        
+        # Generate conversational response
+        chat_response = self.get_chat_response(message, influencer_id, fan_id, influencer_name)
+        
+        # Handle product recommendations
+        full_response = chat_response
+        
+        # If explicit product interest is detected, use that query
+        if is_product_query:
+            product_recommendations = self.get_product_recommendations(product_query, influencer_id)
+            full_response = f"{chat_response}\n\n{product_recommendations}"
+            was_promotion = True
+        # Otherwise, if it's time to promote based on settings, use the default product
+        elif should_promote:
+            product_query = self.get_product_query_for_promotion(influencer_id)
+            if product_query:
+                product_recommendations = self.get_product_recommendations(product_query, influencer_id)
+                full_response = f"{chat_response}\n\n{product_recommendations}"
+                was_promotion = True
+            else:
+                was_promotion = False
+        else:
+            was_promotion = False
+        
+        # Update conversation counter if we have a fan and db
+        if fan_id and self.db:
+            self.db.increment_conversation_counter(influencer_id, fan_id, was_promotion)
+        
+        # Generate video avatar for the chat response only (not including product recommendations)
+        video_url = self.generate_avatar_video(chat_response, influencer_id)
+        
+        # Generate audio if voice mode is enabled
+        audio_url = None
+        if voice_mode:
+            if voice_id:
+                # Use the influencer's cloned voice if available
+                audio_url = self.generate_voice_audio(chat_response, voice_id)
+            else:
+                # Use a default voice if no cloned voice is available
+                audio_url = self.generate_voice_audio(chat_response)
+        
+        return {
+            "text": full_response,
+            "chat_response": chat_response,  # Just the conversational part
+            "video_url": video_url,
+            "audio_url": audio_url,
+            "has_product_recommendations": is_product_query or (should_promote and product_query is not None),
+            "voice_mode": voice_mode
+        }

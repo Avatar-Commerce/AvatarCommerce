@@ -1109,6 +1109,327 @@ def get_dashboard_data(current_user):
             "status": "error"
         }), 500
 
+# Promotion Settings Endpoints
+@app.route('/api/promotion/settings', methods=['GET'])
+@influencer_token_required
+def get_promotion_settings(current_user):
+    """Get promotion settings for the influencer"""
+    try:
+        settings = db.get_promotion_settings(current_user["id"])
+        
+        return jsonify({
+            "status": "success",
+            "data": settings
+        })
+    except Exception as e:
+        logger.error(f"Get promotion settings error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+@app.route('/api/promotion/settings', methods=['PUT'])
+@influencer_token_required
+def update_promotion_settings(current_user):
+    """Update promotion settings for the influencer"""
+    try:
+        data = request.get_json()
+        
+        # Validate inputs
+        promotion_frequency = data.get("promotion_frequency")
+        if promotion_frequency is not None:
+            try:
+                promotion_frequency = int(promotion_frequency)
+                if promotion_frequency < 1:
+                    return jsonify({
+                        "message": "Promotion frequency must be at least 1",
+                        "status": "error"
+                    }), 400
+            except ValueError:
+                return jsonify({
+                    "message": "Promotion frequency must be a number",
+                    "status": "error" 
+                }), 400
+        
+        promote_at_end = data.get("promote_at_end")
+        if promote_at_end is not None:
+            if not isinstance(promote_at_end, bool):
+                return jsonify({
+                    "message": "Promote at end must be a boolean",
+                    "status": "error"
+                }), 400
+        
+        # Build updates object
+        updates = {}
+        if promotion_frequency is not None:
+            updates["promotion_frequency"] = promotion_frequency
+        if promote_at_end is not None:
+            updates["promote_at_end"] = promote_at_end
+        
+        # Update settings
+        success = db.update_promotion_settings(current_user["id"], updates)
+        
+        if not success:
+            return jsonify({
+                "message": "Failed to update promotion settings",
+                "status": "error"
+            }), 500
+        
+        # Return updated settings
+        settings = db.get_promotion_settings(current_user["id"])
+        
+        return jsonify({
+            "message": "Promotion settings updated successfully",
+            "status": "success",
+            "data": settings
+        })
+    except Exception as e:
+        logger.error(f"Update promotion settings error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+# Influencer Products Endpoints
+@app.route('/api/promotion/products', methods=['GET'])
+@influencer_token_required
+def get_influencer_products(current_user):
+    """Get all products for the influencer"""
+    try:
+        products = db.get_influencer_products(current_user["id"])
+        
+        return jsonify({
+            "status": "success",
+            "data": {
+                "products": products
+            }
+        })
+    except Exception as e:
+        logger.error(f"Get influencer products error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+@app.route('/api/promotion/products', methods=['POST'])
+@influencer_token_required
+def add_influencer_product(current_user):
+    """Add a product for the influencer to promote"""
+    try:
+        data = request.get_json()
+        
+        # Validate inputs
+        product_name = data.get("product_name")
+        if not product_name:
+            return jsonify({
+                "message": "Product name is required",
+                "status": "error"
+            }), 400
+        
+        product_query = data.get("product_query")
+        if not product_query:
+            return jsonify({
+                "message": "Product query is required",
+                "status": "error"
+            }), 400
+        
+        is_default = data.get("is_default", False)
+        
+        # Add product
+        product = db.add_influencer_product(
+            current_user["id"],
+            product_name,
+            product_query,
+            is_default
+        )
+        
+        if not product:
+            return jsonify({
+                "message": "Failed to add product",
+                "status": "error"
+            }), 500
+        
+        return jsonify({
+            "message": "Product added successfully",
+            "status": "success",
+            "data": product
+        })
+    except Exception as e:
+        logger.error(f"Add influencer product error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+@app.route('/api/promotion/products/<product_id>', methods=['DELETE'])
+@influencer_token_required
+def delete_influencer_product(current_user, product_id):
+    """Delete a product"""
+    try:
+        # Check if product belongs to influencer
+        products = db.get_influencer_products(current_user["id"])
+        product_ids = [p.get("id") for p in products]
+        
+        if product_id not in product_ids:
+            return jsonify({
+                "message": "Product not found or does not belong to you",
+                "status": "error"
+            }), 404
+        
+        # Delete product
+        success = db.delete_influencer_product(product_id)
+        
+        if not success:
+            return jsonify({
+                "message": "Failed to delete product",
+                "status": "error"
+            }), 500
+        
+        return jsonify({
+            "message": "Product deleted successfully",
+            "status": "success"
+        })
+    except Exception as e:
+        logger.error(f"Delete influencer product error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+@app.route('/api/promotion/products/<product_id>/set-default', methods=['POST'])
+@influencer_token_required
+def set_default_product(current_user, product_id):
+    """Set a product as the default"""
+    try:
+        # Check if product belongs to influencer
+        products = db.get_influencer_products(current_user["id"])
+        product_ids = [p.get("id") for p in products]
+        
+        if product_id not in product_ids:
+            return jsonify({
+                "message": "Product not found or does not belong to you",
+                "status": "error"
+            }), 404
+        
+        # Set as default
+        success = db.set_default_product(product_id)
+        
+        if not success:
+            return jsonify({
+                "message": "Failed to set product as default",
+                "status": "error"
+            }), 500
+        
+        return jsonify({
+            "message": "Product set as default successfully",
+            "status": "success"
+        })
+    except Exception as e:
+        logger.error(f"Set default product error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+@app.route('/api/promotion/reset-counter', methods=['POST'])
+@influencer_token_required
+def reset_promotion_counter(current_user):
+    """Reset the promotion counter for a specific fan"""
+    try:
+        data = request.get_json()
+        
+        # Validate inputs
+        fan_id = data.get("fan_id")
+        if not fan_id:
+            return jsonify({
+                "message": "Fan ID is required",
+                "status": "error"
+            }), 400
+        
+        # Check if fan exists
+        fan = db.get_fan(fan_id)
+        if not fan:
+            return jsonify({
+                "message": "Fan not found",
+                "status": "error"
+            }), 404
+        
+        # Reset counter
+        success = db.reset_conversation_counter(current_user["id"], fan_id)
+        
+        if not success:
+            return jsonify({
+                "message": "Failed to reset counter",
+                "status": "error"
+            }), 500
+        
+        return jsonify({
+            "message": "Counter reset successfully",
+            "status": "success"
+        })
+    except Exception as e:
+        logger.error(f"Reset counter error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+# Analytics enhancement for promotion tracking
+@app.route('/api/analytics/promotion', methods=['GET'])
+@influencer_token_required
+def get_promotion_analytics(current_user):
+    """Get promotion analytics for the influencer"""
+    try:
+        # Get total interactions
+        total_interactions = admin_supabase.table("chat_interactions") \
+            .select("count", {"count": "exact", "head": True}) \
+            .eq("influencer_id", current_user["id"]) \
+            .execute()
+            
+        # Count product recommendations
+        product_interactions = admin_supabase.table("chat_interactions") \
+            .select("count", {"count": "exact", "head": True}) \
+            .eq("influencer_id", current_user["id"]) \
+            .eq("product_recommendations", True) \
+            .execute()
+            
+        # Get all conversation counters
+        counters_response = admin_supabase.table("conversation_counters") \
+            .select("*") \
+            .eq("influencer_id", current_user["id"]) \
+            .execute()
+        
+        counters = counters_response.data if counters_response.data else []
+        
+        # Get promotion settings
+        settings = db.get_promotion_settings(current_user["id"])
+        
+        # Get products
+        products = db.get_influencer_products(current_user["id"])
+        
+        # Calculate promotion rate
+        promotion_rate = 0
+        if total_interactions.count > 0:
+            promotion_rate = (product_interactions.count / total_interactions.count) * 100
+        
+        return jsonify({
+            "status": "success",
+            "data": {
+                "total_interactions": total_interactions.count if hasattr(total_interactions, 'count') else 0,
+                "product_interactions": product_interactions.count if hasattr(product_interactions, 'count') else 0,
+                "promotion_rate": round(promotion_rate, 2),
+                "active_conversations": len(counters),
+                "promotion_settings": settings,
+                "products": products
+            }
+        })
+    except Exception as e:
+        logger.error(f"Promotion analytics error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
 # Main Application Entry
 if __name__ == "__main__":
     # Make sure all required environment variables are set
