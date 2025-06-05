@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import os
 import uuid
@@ -14,6 +14,7 @@ import base64
 
 from config import (SUPABASE_URL, SUPABASE_KEY, HEYGEN_API_KEY, 
                    SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET_KEY)
+from config import ALL_AFFILIATE_PLATFORMS, get_enabled_platforms
 from database import Database
 from chatbot import Chatbot
 from supabase import create_client, Client
@@ -50,6 +51,10 @@ admin_supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 # Initialize database and chatbot
 db = Database()
 chatbot = Chatbot(db)  # Pass the db instance to chatbot
+
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    return send_from_directory('static', filename)
 
 #-----------------------
 # Authentication Helpers
@@ -91,56 +96,19 @@ def influencer_token_required(f):
     decorated.__name__ = f.__name__
     return decorated
 
-def fan_token_required(f):
-    def decorated(*args, **kwargs):
-        token = None
-        
-        if 'Authorization' in request.headers:
-            auth_header = request.headers['Authorization']
-            try:
-                token = auth_header.split(" ")[1]
-            except IndexError:
-                return jsonify({'message': 'Invalid token format!', 'status': 'error'}), 401
-        
-        if not token:
-            return jsonify({'message': 'Token is missing!', 'status': 'error'}), 401
-            
-        try:
-            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
-            
-            # Verify it's a fan token
-            if data.get('user_type') != 'fan':
-                return jsonify({'message': 'Invalid token type!', 'status': 'error'}), 401
-                
-            current_user = db.get_fan_by_username(data['username'])
-            
-            if not current_user:
-                return jsonify({'message': 'User not found!', 'status': 'error'}), 401
-        except jwt.ExpiredSignatureError:
-            return jsonify({'message': 'Token has expired!', 'status': 'error'}), 401
-        except jwt.InvalidTokenError:
-            return jsonify({'message': 'Invalid token!', 'status': 'error'}), 401
-        except Exception as e:
-            return jsonify({'message': f'Token error: {str(e)}', 'status': 'error'}), 401
-            
-        return f(current_user, *args, **kwargs)
-    
-    decorated.__name__ = f.__name__
-    return decorated
-
 #-----------------------
 # API Routes for Influencers
 #-----------------------
 
 # Authentication Routes for Influencers
-@app.route('/api/auth/influencer/register', methods=['POST'])
+@app.route('/api/influencer/register', methods=['POST'])
 def register_influencer():
     data = request.get_json()
     username = data.get("username")
     email = data.get("email")
     password = data.get("password")
-    affiliate_id = data.get("affiliate_id", "")
     bio = data.get("bio", "")
+    affiliate_links = data.get("affiliate_links", [])
 
     # Validate input data
     if not username or not email or not password:
@@ -149,7 +117,7 @@ def register_influencer():
             "status": "error"
         }), 400
         
-    # Username validation - alphanumeric and underscore only
+    # Username validation
     if not username.replace("_", "").isalnum():
         return jsonify({
             "message": "Username can only contain letters, numbers, and underscores",
@@ -171,6 +139,33 @@ def register_influencer():
             "status": "error"
         }), 400
 
+    # Validate affiliate links if provided
+    enabled_platforms = get_enabled_platforms()
+    warnings = []
+    
+    for link in affiliate_links:
+        platform = link.get('platform')
+        affiliate_id = link.get('affiliate_id')
+        
+        if not platform or not affiliate_id:
+            return jsonify({
+                "message": "Invalid affiliate link data",
+                "status": "error"
+            }), 400
+            
+        # Check if platform exists in our system
+        if platform not in ALL_AFFILIATE_PLATFORMS:
+            platform_names = [info["name"] for info in ALL_AFFILIATE_PLATFORMS.values()]
+            return jsonify({
+                "message": f"Invalid platform '{platform}'. Available: {', '.join(platform_names)}",
+                "status": "error"
+            }), 400
+        
+        # Warn about unconfigured platforms but don't block registration
+        if platform not in enabled_platforms:
+            platform_name = ALL_AFFILIATE_PLATFORMS[platform]["name"]
+            warnings.append(f"{platform_name} is not yet configured but your link has been saved")
+
     # Create user
     influencer_id = str(uuid.uuid4())
     influencer_data = {
@@ -178,7 +173,6 @@ def register_influencer():
         "username": username,
         "email": email,
         "password_hash": password_hash,
-        "affiliate_id": affiliate_id if affiliate_id else None,
         "bio": bio if bio else None
     }
 
@@ -189,14 +183,24 @@ def register_influencer():
             "status": "error"
         }), 500
 
-    # Generate chat page URL
-    chat_page_url = f"/chat/{username}"
-    
-    # Add affiliate information if provided
-    if affiliate_id:
-        db.add_affiliate_link(influencer_id, "amazon", affiliate_id)
+    # Add affiliate links
+    affiliate_results = []
+    for i, link in enumerate(affiliate_links):
+        platform = link.get('platform')
+        affiliate_id = link.get('affiliate_id')
+        is_primary = i == 0  # First affiliate link is primary by default
+        
+        result = db.add_affiliate_link(influencer_id, platform, affiliate_id, is_primary)
+        if result:
+            affiliate_results.append({
+                "platform": platform,
+                "platform_name": ALL_AFFILIATE_PLATFORMS[platform]["name"],
+                "affiliate_id": affiliate_id,
+                "is_primary": is_primary,
+                "configured": platform in enabled_platforms
+            })
 
-    return jsonify({
+    response_data = {
         "message": "Registration successful", 
         "status": "success",
         "data": {
@@ -204,11 +208,17 @@ def register_influencer():
             "username": new_influencer["username"],
             "email": new_influencer["email"],
             "bio": new_influencer.get("bio", ""),
-            "chat_page_url": chat_page_url
+            "chat_page_url": f"/chat/{username}",
+            "affiliate_links": affiliate_results
         }
-    }), 201
+    }
+    
+    if warnings:
+        response_data["warnings"] = warnings
 
-@app.route('/api/auth/influencer/login', methods=['POST'])
+    return jsonify(response_data), 201
+
+@app.route('/api/influencer/login', methods=['POST'])
 def login_influencer():
     try:
         # Get JSON data from request
@@ -504,15 +514,31 @@ def add_affiliate(current_user):
         data = request.get_json()
         platform = data.get("platform")
         affiliate_id = data.get("affiliate_id")
+        is_primary = data.get("is_primary", False)
         
         if not platform or not affiliate_id:
             return jsonify({
                 "message": "Platform and affiliate_id are required",
                 "status": "error"
             }), 400
+        
+        # Check if platform exists (even if not enabled yet)
+        if platform not in ALL_AFFILIATE_PLATFORMS:
+            platform_names = [info["name"] for info in ALL_AFFILIATE_PLATFORMS.values()]
+            return jsonify({
+                "message": f"Invalid platform. Available platforms: {', '.join(platform_names)}",
+                "status": "error"
+            }), 400
+        
+        # Warn if platform is not yet configured but allow saving
+        enabled_platforms = get_enabled_platforms()
+        if platform not in enabled_platforms:
+            warning_message = f"Note: {ALL_AFFILIATE_PLATFORMS[platform]['name']} is not yet configured in the system. Your affiliate link has been saved and will work once the platform is configured."
+        else:
+            warning_message = None
             
         # Add/update affiliate link
-        result = db.add_affiliate_link(current_user["id"], platform, affiliate_id)
+        result = db.add_affiliate_link(current_user["id"], platform, affiliate_id, is_primary)
         
         if not result:
             return jsonify({
@@ -520,14 +546,16 @@ def add_affiliate(current_user):
                 "status": "error"
             }), 500
             
-        # Also update the influencer's primary affiliate ID
-        db.update_influencer(current_user["id"], {"affiliate_id": affiliate_id})
-        
-        return jsonify({
+        response_data = {
             "message": "Affiliate information added successfully",
             "status": "success",
             "data": result
-        })
+        }
+        
+        if warning_message:
+            response_data["warning"] = warning_message
+            
+        return jsonify(response_data)
         
     except Exception as e:
         logger.error(f"Add affiliate error: {str(e)}")
@@ -540,11 +568,15 @@ def add_affiliate(current_user):
 @influencer_token_required
 def get_affiliates(current_user):
     try:
-        affiliate_links = db.get_affiliate_links(current_user["id"])
+        platform = request.args.get('platform')  # Optional filter by platform
+        affiliate_links = db.get_affiliate_links(current_user["id"], platform)
+        primary_link = db.get_primary_affiliate_link(current_user["id"])
+        
         return jsonify({
             "status": "success",
             "data": {
-                "affiliate_links": affiliate_links
+                "affiliate_links": affiliate_links,
+                "primary_affiliate": primary_link
             }
         })
     except Exception as e:
@@ -554,132 +586,70 @@ def get_affiliates(current_user):
             "status": "error"
         }), 500
 
-#-----------------------
-# API Routes for Fans
-#-----------------------
-
-@app.route('/api/auth/fan/register', methods=['POST'])
-def register_fan():
-    data = request.get_json()
-    username = data.get("username")
-    email = data.get("email")
-    password = data.get("password")
-
-    # Validate input data
-    if not username or not email or not password:
-        return jsonify({
-            "message": "Username, email, and password are required",
-            "status": "error"
-        }), 400
-        
-    # Username validation - alphanumeric and underscore only
-    if not username.replace("_", "").isalnum():
-        return jsonify({
-            "message": "Username can only contain letters, numbers, and underscores",
-            "status": "error"
-        }), 400
-        
-    # Hash the password
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-
-    # Check if the username or email already exists
-    if db.get_fan_by_username(username):
-        return jsonify({
-            "message": "Username already exists",
-            "status": "error"
-        }), 400
-    if db.get_fan_by_email(email):
-        return jsonify({
-            "message": "Email already exists",
-            "status": "error"
-        }), 400
-
-    # Create user
-    fan_id = str(uuid.uuid4())
-    fan_data = {
-        "id": fan_id,
-        "username": username,
-        "email": email,
-        "password_hash": password_hash
-    }
-
-    new_fan = db.create_fan(fan_data)
-    if not new_fan:
-        return jsonify({
-            "message": "Failed to create fan account",
-            "status": "error"
-        }), 500
-
-    return jsonify({
-        "message": "Registration successful", 
-        "status": "success",
-        "data": {
-            "id": new_fan["id"],
-            "username": new_fan["username"],
-            "email": new_fan["email"]
-        }
-    }), 201
-
-@app.route('/api/auth/fan/login', methods=['POST'])
-def login_fan():
+@app.route('/api/affiliate/<platform>', methods=['DELETE'])
+@influencer_token_required
+def delete_affiliate(current_user, platform):
     try:
-        # Get JSON data from request
-        data = request.get_json()
-        username = data.get("username")
-        password = data.get("password")
-
-        if not username or not password:
+        # Validate platform
+        valid_platforms = ['rakuten', 'amazon', 'shareasale', 'cj_affiliate']
+        if platform not in valid_platforms:
             return jsonify({
-                "message": "Username and password are required",
+                "message": f"Invalid platform. Must be one of: {', '.join(valid_platforms)}",
                 "status": "error"
             }), 400
-
-        # Fetch user from database
-        fan = db.get_fan_by_username(username)
-
-        if not fan:
+        
+        # Delete affiliate link
+        success = db.delete_affiliate_link(current_user["id"], platform)
+        
+        if not success:
             return jsonify({
-                "message": "Invalid username or password",
+                "message": "Failed to delete affiliate link",
                 "status": "error"
-            }), 401
-
-        # Hash the input password for comparison
-        hashed_input_password = hashlib.sha256(password.encode()).hexdigest()
-
-        # Compare hashed passwords
-        if fan["password_hash"] != hashed_input_password:
-            return jsonify({
-                "message": "Invalid username or password",
-                "status": "error"
-            }), 401
-
-        # Generate JWT token
-        token_payload = {
-            "username": fan["username"],
-            "id": fan["id"],
-            "user_type": "fan",
-            "exp": datetime.utcnow() + timedelta(days=30)  # Token expires in 30 days
-        }
-        token = jwt.encode(token_payload, app.config['SECRET_KEY'], algorithm="HS256")
-
+            }), 500
+        
         return jsonify({
-            "message": "Login successful",
-            "status": "success",
-            "data": {
-                "id": fan["id"],
-                "username": fan["username"],
-                "email": fan["email"],
-                "token": token
-            }
-        }), 200
-
+            "message": f"{platform} affiliate link deleted successfully",
+            "status": "success"
+        })
+        
     except Exception as e:
-        logger.error(f"Fan login error: {str(e)}")
+        logger.error(f"Delete affiliate error: {str(e)}")
         return jsonify({
             "message": str(e),
             "status": "error"
         }), 500
 
+# GET available affiliate platforms
+@app.route('/api/affiliate/platforms', methods=['GET'])
+def get_available_platforms():
+    """Get list of available affiliate platforms (both enabled and disabled)"""
+    try:
+        enabled_platforms = get_enabled_platforms()
+        
+        # Return all platforms with their status
+        platforms_with_status = {}
+        for platform_key, platform_info in ALL_AFFILIATE_PLATFORMS.items():
+            platforms_with_status[platform_key] = {
+                "name": platform_info["name"],
+                "enabled": platform_key in enabled_platforms,
+                "configured": platform_key in enabled_platforms
+            }
+        
+        return jsonify({
+            "status": "success",
+            "data": {
+                "platforms": platforms_with_status,
+                "enabled_count": len(enabled_platforms),
+                "total_count": len(ALL_AFFILIATE_PLATFORMS)
+            }
+        })
+    except Exception as e:
+        logger.error(f"Get platforms error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+    
 # Voice Chat Features
 @app.route('/api/voice/speech-to-text', methods=['POST'])
 def speech_to_text():
@@ -864,23 +834,39 @@ def get_available_voices():
 # Chat Functionality
 @app.route('/api/chat', methods=['POST'])
 def chat_message():
-    """Generate response using Chatbot with optional product recommendations and voice"""
-    data = request.get_json()
-    if not data:
+    """Generate response using Chatbot with optional product recommendations and voice - No authentication required"""
+    try:
+        # Ensure JSON data is received
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid request. No JSON data provided."
+            }), 400
+    except Exception as e:
+        logger.error(f"JSON parsing error: {str(e)}")
         return jsonify({
-            "message": "Request must be JSON",
-            "status": "error"
+            "status": "error", 
+            "message": f"Invalid JSON data: {str(e)}"
         }), 400
-    
-    user_message = data.get("message", "")
+
+    # Extract required fields with error checking
+    user_message = data.get("message", "").strip()
     influencer_id = data.get("influencer_id")
-    fan_id = data.get("fan_id")  # Optional fan ID for conversation tracking
+    session_id = data.get("session_id")  # Optional session ID for conversation tracking
     voice_mode = data.get("voice_mode", False)  # Default to false if not provided
-    
-    if not user_message or not influencer_id:
+
+    # Validate required fields
+    if not user_message:
         return jsonify({
-            "message": "message and influencer_id are required",
-            "status": "error"
+            "status": "error",
+            "message": "Message cannot be empty"
+        }), 400
+
+    if not influencer_id:
+        return jsonify({
+            "status": "error", 
+            "message": "Influencer ID is required"
         }), 400
 
     try:
@@ -889,36 +875,39 @@ def chat_message():
         
         if not influencer:
             return jsonify({
-                "message": f"Influencer not found: {influencer_id}",
-                "status": "error"
+                "status": "error",
+                "message": f"Influencer not found: {influencer_id}"
             }), 404
         
         avatar_id = influencer.get("heygen_avatar_id")
         
         if not avatar_id:
             return jsonify({
-                "message": "Influencer has no avatar. Please upload an image first.",
-                "status": "error"
+                "status": "error",
+                "message": "Influencer has no avatar. Please upload an image first."
             }), 400
         
-        # 2. Verify fan ID if provided
-        if fan_id:
-            fan = db.get_fan(fan_id)
-            if not fan:
-                return jsonify({
-                    "message": f"Fan not found: {fan_id}",
-                    "status": "error"
-                }), 404
+        # 2. Generate session ID if not provided
+        if not session_id:
+            import secrets
+            session_id = secrets.token_hex(16)
         
         # 3. Get response from Chatbot with product recommendations
-        response = chatbot.get_response(
-            user_message, 
-            influencer_id, 
-            fan_id, 
-            influencer.get("username"),
-            voice_mode,
-            influencer.get("voice_id")
-        )
+        try:
+            response = chatbot.get_response(
+                user_message, 
+                influencer_id, 
+                session_id, 
+                influencer.get("username"),
+                voice_mode,
+                influencer.get("voice_id")
+            )
+        except Exception as bot_error:
+            logger.error(f"Chatbot error: {str(bot_error)}")
+            return jsonify({
+                "status": "error",
+                "message": f"Error generating response: {str(bot_error)}"
+            }), 500
         
         # 4. Log the interaction
         db.log_chat_interaction(
@@ -926,15 +915,16 @@ def chat_message():
             user_message, 
             response["text"], 
             response["has_product_recommendations"],
-            fan_id
+            session_id
         )
         
         # 5. Prepare response data
         response_data = {
             "text": response["text"],
-            "video_url": response["video_url"],
+            "video_url": response.get("video_url", ""),
             "has_product_recommendations": response["has_product_recommendations"],
-            "voice_mode": voice_mode
+            "voice_mode": voice_mode,
+            "session_id": session_id  # Return session ID for future requests
         }
         
         # Add audio URL if voice mode is enabled
@@ -947,10 +937,10 @@ def chat_message():
         })
 
     except Exception as e:
-        logger.error(f"Chat endpoint error: {str(e)}")
+        logger.error(f"Chat endpoint unexpected error: {str(e)}")
         return jsonify({
-            "message": str(e),
-            "status": "error"
+            "status": "error",
+            "message": f"Unexpected server error: {str(e)}"
         }), 500
 
 # Public chat page info
@@ -1004,57 +994,317 @@ def get_public_chat_info(username):
             "status": "error"
         }), 500
 
-# Fan Chat History
-@app.route('/api/fan/chat-history', methods=['GET'])
-@fan_token_required
-def get_fan_chat_history(current_user):
-    """Get chat history for a fan with an influencer"""
+# Generate embed code for influencer
+@app.route('/api/embed/generate', methods=['POST'])
+@influencer_token_required
+def generate_embed_code(current_user):
+    """Generate embed code for influencer's chatbot"""
     try:
-        influencer_id = request.args.get('influencer_id')
-        limit = request.args.get('limit', 20)
+        data = request.get_json()
         
-        try:
-            limit = int(limit)
-            if limit < 1 or limit > 100:
-                limit = 20  # Default if limit is out of range
-        except ValueError:
-            limit = 20  # Default if limit is not a valid integer
+        # Get customization options
+        width = data.get('width', '400px')
+        height = data.get('height', '600px')
+        position = data.get('position', 'bottom-right')  # bottom-right, bottom-left, custom
+        theme = data.get('theme', 'default')  # default, dark, light, custom
+        trigger_text = data.get('trigger_text', 'Chat with me!')
+        auto_open = data.get('auto_open', False)
+        custom_css = data.get('custom_css', '')
         
-        if not influencer_id:
+        # Validate influencer has avatar
+        if not current_user.get("heygen_avatar_id"):
             return jsonify({
-                "message": "influencer_id is required",
+                "message": "You must create an avatar before generating embed code",
                 "status": "error"
             }), 400
-            
-        # Check if influencer exists
-        influencer = db.get_influencer(influencer_id)
-        if not influencer:
-            return jsonify({
-                "message": f"Influencer not found: {influencer_id}",
-                "status": "error"
-            }), 404
-            
-        # Get chat history
-        chat_history = db.get_chat_history(influencer_id, current_user["id"], limit)
+        
+        # Generate embed script
+        base_url = request.host_url.rstrip('/')  # Get the base URL dynamically
+        influencer_id = current_user["id"]
+        username = current_user["username"]
+        
+        # Create the embed code
+        embed_code = f'''<!-- AvatarCommerce Chatbot Embed -->
+<div id="avatarcommerce-chatbot-{influencer_id}"></div>
+<script>
+(function() {{
+    var config = {{
+        influencerId: "{influencer_id}",
+        username: "{username}",
+        baseUrl: "{base_url}",
+        width: "{width}",
+        height: "{height}",
+        position: "{position}",
+        theme: "{theme}",
+        triggerText: "{trigger_text}",
+        autoOpen: {str(auto_open).lower()},
+        customCss: `{custom_css}`
+    }};
+    
+    var script = document.createElement('script');
+    script.src = config.baseUrl + '/static/embed/chatbot-widget.js';
+    script.onload = function() {{
+        AvatarCommerceWidget.init(config);
+    }};
+    document.head.appendChild(script);
+    
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = config.baseUrl + '/static/embed/chatbot-widget.css';
+    document.head.appendChild(link);
+}})();
+</script>
+<!-- End AvatarCommerce Chatbot Embed -->'''
+
+        # Store embed configuration
+        embed_config = {
+            "influencer_id": influencer_id,
+            "width": width,
+            "height": height,
+            "position": position,
+            "theme": theme,
+            "trigger_text": trigger_text,
+            "auto_open": auto_open,
+            "custom_css": custom_css,
+            "generated_at": datetime.utcnow().isoformat()
+        }
+        
+        # Update influencer record with embed config
+        db.update_influencer(influencer_id, {"embed_config": embed_config})
         
         return jsonify({
             "status": "success",
             "data": {
-                "chat_history": chat_history,
-                "influencer": {
-                    "username": influencer["username"],
-                    "id": influencer["id"]
-                }
+                "embed_code": embed_code,
+                "preview_url": f"{base_url}/embed/preview/{username}",
+                "config": embed_config
             }
         })
         
     except Exception as e:
-        logger.error(f"Get fan chat history error: {str(e)}")
+        logger.error(f"Generate embed code error: {str(e)}")
         return jsonify({
             "message": str(e),
             "status": "error"
         }), 500
 
+# Get current embed configuration
+@app.route('/api/embed/config', methods=['GET'])
+@influencer_token_required
+def get_embed_config(current_user):
+    """Get current embed configuration for influencer"""
+    try:
+        embed_config = current_user.get("embed_config", {})
+        
+        # Set defaults if no config exists
+        if not embed_config:
+            embed_config = {
+                "width": "400px",
+                "height": "600px",
+                "position": "bottom-right",
+                "theme": "default",
+                "trigger_text": "Chat with me!",
+                "auto_open": False,
+                "custom_css": ""
+            }
+        
+        return jsonify({
+            "status": "success",
+            "data": {
+                "config": embed_config,
+                "has_avatar": current_user.get("heygen_avatar_id") is not None,
+                "preview_url": f"{request.host_url.rstrip('/')}/embed/preview/{current_user['username']}"
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Get embed config error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+# Serve embed preview page
+@app.route('/embed/preview/<username>')
+def embed_preview(username):
+    """Serve a preview page showing how the embedded chatbot looks"""
+    try:
+        # Get influencer details
+        influencer = db.get_influencer_by_username(username)
+        
+        if not influencer:
+            return f"Influencer '{username}' not found", 404
+            
+        if not influencer.get("heygen_avatar_id"):
+            return f"{username} hasn't created their avatar yet", 404
+        
+        embed_config = influencer.get("embed_config", {})
+        
+        # Default config if none exists
+        if not embed_config:
+            embed_config = {
+                "width": "400px",
+                "height": "600px",
+                "position": "bottom-right",
+                "theme": "default",
+                "trigger_text": "Chat with me!",
+                "auto_open": False,
+                "custom_css": ""
+            }
+        
+        # Generate preview HTML
+        preview_html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatbot Preview - {username}</title>
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }}
+        .preview-container {{
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }}
+        .preview-header {{
+            text-align: center;
+            margin-bottom: 30px;
+        }}
+        .sample-content {{
+            margin: 40px 0;
+            padding: 20px;
+            border: 1px dashed #ccc;
+            background: #fafafa;
+        }}
+        .config-info {{
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="preview-container">
+        <div class="preview-header">
+            <h1>Chatbot Embed Preview</h1>
+            <p>This is how your chatbot will appear on websites</p>
+        </div>
+        
+        <div class="config-info">
+            <h3>Current Configuration:</h3>
+            <ul>
+                <li><strong>Size:</strong> {embed_config.get('width', '400px')} × {embed_config.get('height', '600px')}</li>
+                <li><strong>Position:</strong> {embed_config.get('position', 'bottom-right')}</li>
+                <li><strong>Theme:</strong> {embed_config.get('theme', 'default')}</li>
+                <li><strong>Trigger Text:</strong> "{embed_config.get('trigger_text', 'Chat with me!')}"</li>
+                <li><strong>Auto Open:</strong> {'Yes' if embed_config.get('auto_open', False) else 'No'}</li>
+            </ul>
+        </div>
+        
+        <div class="sample-content">
+            <h2>Sample Website Content</h2>
+            <p>This is sample content to show how your chatbot integrates with a website. The chatbot widget should appear in the {embed_config.get('position', 'bottom-right')} corner.</p>
+            <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+        </div>
+    </div>
+    
+    <!-- Embed the actual chatbot -->
+    <div id="avatarcommerce-chatbot-{influencer['id']}"></div>
+    <script>
+    (function() {{
+        var config = {{
+            influencerId: "{influencer['id']}",
+            username: "{username}",
+            baseUrl: "{request.host_url.rstrip('/')}",
+            width: "{embed_config.get('width', '400px')}",
+            height: "{embed_config.get('height', '600px')}",
+            position: "{embed_config.get('position', 'bottom-right')}",
+            theme: "{embed_config.get('theme', 'default')}",
+            triggerText: "{embed_config.get('trigger_text', 'Chat with me!')}",
+            autoOpen: {str(embed_config.get('auto_open', False)).lower()},
+            customCss: `{embed_config.get('custom_css', '')}`
+        }};
+        
+        var script = document.createElement('script');
+        script.src = config.baseUrl + '/static/embed/chatbot-widget.js';
+        script.onload = function() {{
+            AvatarCommerceWidget.init(config);
+        }};
+        document.head.appendChild(script);
+        
+        var link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = config.baseUrl + '/static/embed/chatbot-widget.css';
+        document.head.appendChild(link);
+    }})();
+    </script>
+</body>
+</html>'''
+        
+        return preview_html
+        
+    except Exception as e:
+        logger.error(f"Embed preview error: {str(e)}")
+        return f"Error loading preview: {str(e)}", 500
+
+# Analytics for embedded chatbots
+@app.route('/api/analytics/embed', methods=['GET'])
+@influencer_token_required
+def get_embed_analytics(current_user):
+    """Get analytics for embedded chatbot usage"""
+    try:
+        # Get date range from query params
+        days = request.args.get('days', 30, type=int)
+        start_date = datetime.utcnow() - timedelta(days=days)
+        
+        # Get embed-specific interactions (those with referrer data)
+        embed_interactions = admin_supabase.table("chat_interactions") \
+            .select("created_at, session_id") \
+            .eq("influencer_id", current_user["id"]) \
+            .gte("created_at", start_date.isoformat()) \
+            .execute()
+        
+        # Calculate metrics
+        total_embed_chats = len(embed_interactions.data)
+        unique_sessions = len(set([chat.get("session_id") for chat in embed_interactions.data if chat.get("session_id")]))
+        
+        # Group by date for chart
+        daily_stats = {}
+        for interaction in embed_interactions.data:
+            date = interaction["created_at"][:10]  # YYYY-MM-DD
+            daily_stats[date] = daily_stats.get(date, 0) + 1
+        
+        return jsonify({
+            "status": "success",
+            "data": {
+                "total_embed_chats": total_embed_chats,
+                "unique_visitors": unique_sessions,
+                "daily_stats": daily_stats,
+                "avg_daily_chats": total_embed_chats / days if days > 0 else 0,
+                "date_range": {
+                    "start": start_date.isoformat(),
+                    "end": datetime.utcnow().isoformat(),
+                    "days": days
+                }
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Embed analytics error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+    
 # Analytics
 @app.route('/api/analytics/dashboard', methods=['GET'])
 @influencer_token_required
@@ -1334,28 +1584,20 @@ def set_default_product(current_user, product_id):
 @app.route('/api/promotion/reset-counter', methods=['POST'])
 @influencer_token_required
 def reset_promotion_counter(current_user):
-    """Reset the promotion counter for a specific fan"""
+    """Reset the promotion counter for a specific session"""
     try:
         data = request.get_json()
         
         # Validate inputs
-        fan_id = data.get("fan_id")
-        if not fan_id:
+        session_id = data.get("session_id")
+        if not session_id:
             return jsonify({
-                "message": "Fan ID is required",
+                "message": "Session ID is required",
                 "status": "error"
             }), 400
         
-        # Check if fan exists
-        fan = db.get_fan(fan_id)
-        if not fan:
-            return jsonify({
-                "message": "Fan not found",
-                "status": "error"
-            }), 404
-        
         # Reset counter
-        success = db.reset_conversation_counter(current_user["id"], fan_id)
+        success = db.reset_conversation_counter(current_user["id"], session_id)
         
         if not success:
             return jsonify({
@@ -1375,12 +1617,20 @@ def reset_promotion_counter(current_user):
         }), 500
 
 # Analytics enhancement for promotion tracking
-@app.route('/api/analytics/promotion', methods=['GET'])
+@app.route('/api/analytics/dashboard', methods=['GET'])
 @influencer_token_required
-def get_promotion_analytics(current_user):
-    """Get promotion analytics for the influencer"""
+def get_dashboard_data(current_user):
+    """Get dashboard data for the influencer"""
     try:
-        # Get total interactions
+        # Get recent chat interactions
+        interactions = admin_supabase.table("chat_interactions") \
+            .select("*") \
+            .eq("influencer_id", current_user["id"]) \
+            .order("created_at", {"ascending": False}) \
+            .limit(10) \
+            .execute()
+            
+        # Count total interactions
         total_interactions = admin_supabase.table("chat_interactions") \
             .select("count", {"count": "exact", "head": True}) \
             .eq("influencer_id", current_user["id"]) \
@@ -1393,38 +1643,38 @@ def get_promotion_analytics(current_user):
             .eq("product_recommendations", True) \
             .execute()
             
-        # Get all conversation counters
-        counters_response = admin_supabase.table("conversation_counters") \
-            .select("*") \
+        # Count unique sessions (approximate unique visitors)
+        unique_sessions = admin_supabase.table("chat_interactions") \
+            .select("session_id") \
             .eq("influencer_id", current_user["id"]) \
             .execute()
         
-        counters = counters_response.data if counters_response.data else []
+        # Count unique session IDs
+        unique_session_count = len(set([interaction.get("session_id") for interaction in unique_sessions.data if interaction.get("session_id")]))
         
-        # Get promotion settings
-        settings = db.get_promotion_settings(current_user["id"])
-        
-        # Get products
-        products = db.get_influencer_products(current_user["id"])
-        
-        # Calculate promotion rate
-        promotion_rate = 0
-        if total_interactions.count > 0:
-            promotion_rate = (product_interactions.count / total_interactions.count) * 100
-        
+        # Get profile info
+        bucket_name = "influencer-assets"
+        avatar_path = current_user.get("original_asset_path", "")
+        avatar_preview_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_name}/{avatar_path}" if avatar_path else ""
+            
         return jsonify({
             "status": "success",
             "data": {
+                "username": current_user["username"],
+                "email": current_user["email"],
+                "profile_image": avatar_preview_url,
+                "recent_interactions": interactions.data,
                 "total_interactions": total_interactions.count if hasattr(total_interactions, 'count') else 0,
                 "product_interactions": product_interactions.count if hasattr(product_interactions, 'count') else 0,
-                "promotion_rate": round(promotion_rate, 2),
-                "active_conversations": len(counters),
-                "promotion_settings": settings,
-                "products": products
+                "unique_visitors": unique_session_count,
+                "avatar_status": current_user.get("heygen_avatar_id") is not None,
+                "affiliate_status": len(db.get_affiliate_links(current_user["id"])) > 0,
+                "chat_page_url": f"/chat/{current_user['username']}"
             }
         })
+        
     except Exception as e:
-        logger.error(f"Promotion analytics error: {str(e)}")
+        logger.error(f"Dashboard error: {str(e)}")
         return jsonify({
             "message": str(e),
             "status": "error"
@@ -1433,12 +1683,12 @@ def get_promotion_analytics(current_user):
 # Main Application Entry
 if __name__ == "__main__":
     # Make sure all required environment variables are set
-    required_env_vars = ["SUPABASE_URL", "SUPABASE_KEY", "HEYGEN_API_KEY", "APIFY_API_KEY", "JWT_SECRET_KEY"]
+    required_env_vars = ["SUPABASE_URL", "SUPABASE_KEY", "HEYGEN_API_KEY", "RAKUTEN_TOKEN", "JWT_SECRET_KEY"]
     missing_vars = [var for var in required_env_vars if not os.getenv(var)]
     
     if missing_vars:
         print(f"Error: Missing required environment variables: {', '.join(missing_vars)}")
         exit(1)
         
-    port = int(os.getenv("PORT", 8000))
+    port = int(os.getenv("PORT", 2000))
     app.run(host="0.0.0.0", port=port)

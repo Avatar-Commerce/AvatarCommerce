@@ -78,3 +78,4 @@ KeyError: 0
 2025-04-09 10:52:14,848 ERROR: Speech to text error: [WinError 32] The process cannot access the file because it is being used by another process: 'C:\\Users\\ELITEB~1\\AppData\\Local\\Temp\\tmp2gfypx8i.mp3' [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:722]
 2025-04-09 10:57:31,494 ERROR: Text to speech error: Chatbot.generate_voice_audio() takes from 2 to 3 positional arguments but 4 were given [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:766]
 2025-04-09 11:01:01,014 ERROR: Text to speech error: 'Chatbot' object has no attribute 'generate_voice_audio' [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:766]
+2025-04-29 05:56:26,967 ERROR: Dashboard error: BaseSelectRequestBuilder.order() takes 2 positional arguments but 3 were given [in C:\Users\ELITEBOOK\OneDrive\Desktop\Projects\AvatarCommerce\app\main.py:1106]

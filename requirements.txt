@@ -11,3 +11,4 @@ supabase
 flasgger
 gunicorn
 pyjwt
+gtts
