@@ -9,6 +9,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class Database:
+    def __init__(self):
+        """Initialize Supabase client and tables"""
+        self.supabase = create_client(
+            os.getenv("SUPABASE_URL"),
+            os.getenv("SUPABASE_KEY")
+        )
+        self.initialize_tables()
+        
     def initialize_tables(self):
         """Create tables if they don't exist using standard REST API"""
         
@@ -122,6 +130,273 @@ class Database:
                 UNIQUE(influencer_id)
             );
             """)
+            
+    def create_influencer(self, influencer_data: Dict) -> Optional[Dict]:
+        """Create a new influencer with authentication credentials"""
+        required_fields = {'id', 'username', 'email', 'password_hash'}
+        if not all(field in influencer_data for field in required_fields):
+            logger.error(f"Missing required fields: {required_fields}")
+            return None
+
+        # Generate chat page URL
+        username = influencer_data['username']
+        influencer_data['chat_page_url'] = f"/chat/{username}"
+        
+        try:
+            response = self.supabase.table('influencers').insert(influencer_data).execute()
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error creating influencer: {str(e)}")
+            return None
+
+    def get_influencer_by_username(self, username: str) -> Optional[Dict]:
+        """Get influencer by username"""
+        try:
+            response = self.supabase.table('influencers') \
+                .select('*') \
+                .eq('username', username) \
+                .execute()
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error getting influencer: {str(e)}")
+            return None
+
+    def get_influencer_by_email(self, email: str) -> Optional[Dict]:
+        """Get influencer by email"""
+        try:
+            response = self.supabase.table('influencers') \
+                .select('*') \
+                .eq('email', email) \
+                .execute()
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error getting influencer: {str(e)}")
+            return None
+
+    def get_influencer(self, influencer_id: str) -> Optional[Dict]:
+        """Get influencer by ID"""
+        try:
+            response = self.supabase.table('influencers') \
+                .select('*') \
+                .eq('id', influencer_id) \
+                .execute()
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error getting influencer: {str(e)}")
+            return None
+
+    def update_influencer(self, influencer_id: str, updates: Dict) -> bool:
+        """Update influencer data"""
+        if not updates:
+            return False
+
+        try:
+            updates['updated_at'] = 'now()'
+            response = self.supabase.table('influencers') \
+                .update(updates) \
+                .eq('id', influencer_id) \
+                .execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error updating influencer: {str(e)}")
+            return False
+
+    def delete_influencer(self, influencer_id: str) -> bool:
+        """Delete an influencer"""
+        try:
+            response = self.supabase.table('influencers') \
+                .delete() \
+                .eq('id', influencer_id) \
+                .execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting influencer: {str(e)}")
+            return False
+
+    def get_all_influencers(self) -> List[Dict]:
+        """Get all influencers"""
+        try:
+            response = self.supabase.table('influencers') \
+                .select('*') \
+                .execute()
+            return response.data
+        except Exception as e:
+            logger.error(f"Error getting all influencers: {str(e)}")
+            return []
+
+    # Promotion Settings Methods
+    def get_promotion_settings(self, influencer_id: str) -> Optional[Dict]:
+        """Get promotion settings for an influencer"""
+        try:
+            response = self.supabase.table('influencer_promotion_settings') \
+                .select('*') \
+                .eq('influencer_id', influencer_id) \
+                .execute()
+            
+            # Return the first result or create default settings if none exist
+            if response.data:
+                return response.data[0]
+            else:
+                # Create default settings
+                settings_id = str(uuid.uuid4())
+                settings = {
+                    "id": settings_id,
+                    "influencer_id": influencer_id,
+                    "promotion_frequency": 3,  # Default: promote every 3 messages
+                    "promote_at_end": False,   # Default: don't promote at the end of every message
+                    "default_product": None    # No default product
+                }
+                
+                create_response = self.supabase.table('influencer_promotion_settings').insert(settings).execute()
+                return create_response.data[0] if create_response.data else settings
+                
+        except Exception as e:
+            logger.error(f"Error getting promotion settings: {str(e)}")
+            # Return default settings if error
+            return {
+                "promotion_frequency": 3,
+                "promote_at_end": False,
+                "default_product": None
+            }
+
+    def update_promotion_settings(self, influencer_id: str, settings: Dict) -> bool:
+        """Update promotion settings for an influencer"""
+        try:
+            # Get current settings or create if don't exist
+            current_settings = self.get_promotion_settings(influencer_id)
+            settings_id = current_settings.get("id")
+            
+            if settings_id:
+                # Update existing settings
+                settings['updated_at'] = 'now()'
+                response = self.supabase.table('influencer_promotion_settings') \
+                    .update(settings) \
+                    .eq('id', settings_id) \
+                    .execute()
+            else:
+                # Create new settings
+                settings_id = str(uuid.uuid4())
+                settings["id"] = settings_id
+                settings["influencer_id"] = influencer_id
+                response = self.supabase.table('influencer_promotion_settings').insert(settings).execute()
+                
+            return True
+        except Exception as e:
+            logger.error(f"Error updating promotion settings: {str(e)}")
+            return False
+
+    # Influencer Products Methods
+    def add_influencer_product(self, influencer_id: str, product_name: str, product_query: str, is_default: bool = False) -> Optional[Dict]:
+        """Add a product for an influencer to promote"""
+        try:
+            # If this is the default product, unset any existing default
+            if is_default:
+                self.supabase.table('influencer_products') \
+                    .update({"is_default": False, "updated_at": 'now()'}) \
+                    .eq('influencer_id', influencer_id) \
+                    .eq('is_default', True) \
+                    .execute()
+                    
+                # Also update the promotion settings
+                self.update_promotion_settings(influencer_id, {"default_product": product_query})
+            
+            # Create new product
+            product_id = str(uuid.uuid4())
+            product = {
+                "id": product_id,
+                "influencer_id": influencer_id,
+                "product_name": product_name,
+                "product_query": product_query,
+                "is_default": is_default
+            }
+            
+            response = self.supabase.table('influencer_products').insert(product).execute()
+            return response.data[0] if response.data else None
+                
+        except Exception as e:
+            logger.error(f"Error adding influencer product: {str(e)}")
+            return None
+
+    def get_influencer_products(self, influencer_id: str) -> List[Dict]:
+        """Get all products for an influencer"""
+        try:
+            response = self.supabase.table('influencer_products') \
+                .select('*') \
+                .eq('influencer_id', influencer_id) \
+                .execute()
+                
+            return response.data if response.data else []
+                
+        except Exception as e:
+            logger.error(f"Error getting influencer products: {str(e)}")
+            return []
+
+    def get_default_product(self, influencer_id: str) -> Optional[Dict]:
+        """Get the default product for an influencer"""
+        try:
+            response = self.supabase.table('influencer_products') \
+                .select('*') \
+                .eq('influencer_id', influencer_id) \
+                .eq('is_default', True) \
+                .execute()
+                
+            return response.data[0] if response.data else None
+                
+        except Exception as e:
+            logger.error(f"Error getting default product: {str(e)}")
+            return None
+
+    def delete_influencer_product(self, product_id: str) -> bool:
+        """Delete a product"""
+        try:
+            self.supabase.table('influencer_products') \
+                .delete() \
+                .eq('id', product_id) \
+                .execute()
+                
+            return True
+                
+        except Exception as e:
+            logger.error(f"Error deleting influencer product: {str(e)}")
+            return False
+
+    def set_default_product(self, product_id: str) -> bool:
+        """Set a product as the default"""
+        try:
+            # Get the product to check influencer_id
+            response = self.supabase.table('influencer_products') \
+                .select('*') \
+                .eq('id', product_id) \
+                .execute()
+                
+            if not response.data:
+                return False
+                
+            product = response.data[0]
+            influencer_id = product.get("influencer_id")
+            
+            # Unset any existing default
+            self.supabase.table('influencer_products') \
+                .update({"is_default": False, "updated_at": 'now()'}) \
+                .eq('influencer_id', influencer_id) \
+                .eq('is_default', True) \
+                .execute()
+                
+            # Set the new default
+            self.supabase.table('influencer_products') \
+                .update({"is_default": True, "updated_at": 'now()'}) \
+                .eq('id', product_id) \
+                .execute()
+                
+            # Update the promotion settings
+            self.update_promotion_settings(influencer_id, {"default_product": product.get("product_query")})
+                
+            return True
+                
+        except Exception as e:
+            logger.error(f"Error setting default product: {str(e)}")
+            return False
+        
     # Embed configuration methods
     def get_embed_configuration(self, influencer_id: str) -> Optional[Dict]:
         """Get embed configuration for an influencer"""

@@ -44,6 +44,14 @@ CORS(app)
 app.config['SECRET_KEY'] = JWT_SECRET_KEY
 app.config["DEBUG"] = True
 
+CORS(app, resources={
+    r"/api/*": {
+        "origins": ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5500", "http://127.0.0.1:5500"],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
+
 # Initialize Supabase clients
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 admin_supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
@@ -101,7 +109,7 @@ def influencer_token_required(f):
 #-----------------------
 
 # Authentication Routes for Influencers
-@app.route('/api/influencer/register', methods=['POST'])
+@app.route('/api/register', methods=['POST'])
 def register_influencer():
     data = request.get_json()
     username = data.get("username")
@@ -218,7 +226,7 @@ def register_influencer():
 
     return jsonify(response_data), 201
 
-@app.route('/api/influencer/login', methods=['POST'])
+@app.route('/api/login', methods=['POST'])
 def login_influencer():
     try:
         # Get JSON data from request
@@ -380,31 +388,26 @@ def create_avatar(current_user):
                 "status": "error"
             }), 400
 
-        # 2. Check file size before reading
+        # 2. Check file size
         file.seek(0, os.SEEK_END)
         file_size = file.tell()
-        file.seek(0)  # Reset file pointer
+        file.seek(0)
         
-        # Supabase free tier has a 2MB limit per file
-        MAX_FILE_SIZE = 2 * 1024 * 1024  # 2MB in bytes
+        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
         
         if file_size > MAX_FILE_SIZE:
             return jsonify({
                 "message": f"File too large. Maximum size is {MAX_FILE_SIZE/1024/1024}MB",
-                "status": "error",
-                "data": {
-                    "file_size_mb": round(file_size/1024/1024, 2)
-                }
+                "status": "error"
             }), 413
 
-        # 3. Prepare upload
+        # 3. Upload to Supabase storage first (for backup/profile)
         from werkzeug.utils import secure_filename
         safe_filename = secure_filename(file.filename)
         file_path = f"avatars/original_{influencer_id}_{safe_filename}"
         bucket_name = "influencer-assets"
         file_content = file.read()
 
-        # 4. Upload file to storage
         try:
             upload_response = admin_supabase.storage.from_(bucket_name).upload(
                 path=file_path,
@@ -412,100 +415,323 @@ def create_avatar(current_user):
                 file_options={"content-type": file.mimetype}
             )
             
-            # Get public URL for the uploaded image
             public_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_name}/{file_path}"
+            logger.info(f"Image uploaded to Supabase: {public_url}")
             
-            # 5. Connect to HeyGen API
-            try:
-                heygen_headers = {
-                    "X-Api-Key": HEYGEN_API_KEY,
-                    "Accept": "application/json"
-                }
-                
-                logger.info("Attempting to connect to HeyGen API...")
-                
-                # Test the API key by listing avatars
-                test_response = requests.get(
-                    "https://api.heygen.com/v2/avatars",
-                    headers=heygen_headers,
-                    timeout=10  # Add timeout
-                )
-                
-                # Log detailed response for debugging
-                logger.info(f"HeyGen API response: {test_response.status_code}, {test_response.text}")
-                
-                if test_response.status_code != 200:
-                    logger.error(f"HeyGen API test failed: {test_response.text}")
-                    return jsonify({
-                        "message": f"HeyGen API access failed: {test_response.text}",
-                        "status": "error",
-                        "data": {
-                            "path": file_path,
-                            "public_url": public_url
-                        }
-                    }), 500
-                
-                # Process the response
-                response_data = test_response.json()
-                avatars = response_data.get("data", {}).get("avatars", [])
-                
-                if not avatars:
-                    logger.error("No avatars available in HeyGen account")
-                    return jsonify({
-                        "message": "No avatars available in HeyGen account",
-                        "status": "error",
-                        "data": {
-                            "path": file_path,
-                            "public_url": public_url
-                        }
-                    }), 500
-                
-                # Use the first avatar in the list
-                avatar_id = avatars[0].get("avatar_id")
-                logger.info(f"Using HeyGen avatar: {avatar_id}")
-                
-                # Update database with avatar information
-                db.update_influencer(influencer_id, {
-                    "original_asset_path": file_path,
-                    "heygen_avatar_id": avatar_id
-                })
-                
-                return jsonify({
-                    "message": "Avatar assigned successfully",
-                    "status": "success",
-                    "data": {
-                        "path": file_path,
-                        "public_url": public_url,
-                        "avatar_id": avatar_id,
-                        "influencer_id": influencer_id
-                    }
-                })
-                
-            except requests.exceptions.RequestException as e:
-                logger.error(f"HeyGen API request failed: {str(e)}")
-                return jsonify({
-                    "message": f"HeyGen API request failed: {str(e)}",
-                    "status": "error",
-                    "data": {
-                        "path": file_path,
-                        "public_url": public_url
-                    }
-                }), 500
-                
         except Exception as upload_error:
-            logger.error(f"Upload error: {str(upload_error)}")
+            logger.error(f"Supabase upload error: {str(upload_error)}")
             return jsonify({
                 "message": f"Upload failed: {str(upload_error)}",
                 "status": "error"
             }), 500
 
+        # 4. Create custom avatar using HeyGen - FIXED VERSION
+        try:
+            logger.info("Creating custom avatar with HeyGen V2 Photo Avatar API...")
+            
+            # Step 1: Upload image to HeyGen using correct Upload Asset endpoint
+            file.seek(0)  # Reset file pointer
+            
+            # Use the correct upload endpoint: upload.heygen.com
+            upload_headers = {
+                "X-Api-Key": HEYGEN_API_KEY,
+                "Content-Type": file.mimetype  # Use the actual file mimetype
+            }
+            
+            # Make request to correct endpoint
+            upload_response = requests.post(
+                "https://upload.heygen.com/v1/asset",  # CORRECT ENDPOINT
+                headers=upload_headers,
+                data=file_content,  # Send file content directly
+                timeout=60
+            )
+            
+            logger.info(f"HeyGen upload response status: {upload_response.status_code}")
+            logger.info(f"HeyGen upload response: {upload_response.text}")
+            
+            if upload_response.status_code == 200:
+                upload_data = upload_response.json()
+                
+                # Check for errors in response
+                if upload_data.get("code") != 100:  # HeyGen success code is 100
+                    error_msg = upload_data.get("msg") or upload_data.get("message") or "Unknown upload error"
+                    logger.error(f"HeyGen upload error: {error_msg}")
+                    return jsonify({
+                        "message": f"HeyGen upload failed: {error_msg}",
+                        "status": "error",
+                        "data": {"public_url": public_url}
+                    }), 500
+                
+                # Extract asset info from upload response
+                asset_data = upload_data.get("data", {})
+                asset_id = asset_data.get("id")
+                asset_url = asset_data.get("url")
+                
+                if not asset_id:
+                    logger.error(f"No asset ID in response: {upload_data}")
+                    return jsonify({
+                        "message": "No asset ID returned from HeyGen upload",
+                        "status": "error",
+                        "data": {"public_url": public_url}
+                    }), 500
+                
+                logger.info(f"Image uploaded to HeyGen with asset ID: {asset_id}")
+                
+                # Step 2: Create Photo Avatar Group using the asset
+                # For photo avatars, we need to use image_key format
+                image_key = f"image/{asset_id}/original"
+                
+                group_payload = {
+                    "name": f"{current_user['username']}_avatar_{int(datetime.now().timestamp())}",
+                    "image_key": image_key
+                }
+                
+                group_headers = {
+                    "X-Api-Key": HEYGEN_API_KEY,
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                }
+                
+                group_response = requests.post(
+                    "https://api.heygen.com/v2/photo_avatar/avatar_group/create",
+                    headers=group_headers,
+                    json=group_payload,
+                    timeout=60
+                )
+                
+                logger.info(f"HeyGen group creation response: {group_response.status_code}")
+                logger.info(f"HeyGen group creation body: {group_response.text}")
+                
+                if group_response.status_code == 200:
+                    group_data = group_response.json()
+                    
+                    if group_data.get("error"):
+                        logger.error(f"HeyGen group creation error: {group_data['error']}")
+                        return jsonify({
+                            "message": f"Avatar group creation failed: {group_data['error']}",
+                            "status": "error",
+                            "data": {"public_url": public_url}
+                        }), 500
+                    
+                    # Extract group_id
+                    group_id = group_data.get("data", {}).get("id")
+                    
+                    if not group_id:
+                        logger.error(f"No group_id in response: {group_data}")
+                        return jsonify({
+                            "message": "No group ID returned from avatar creation",
+                            "status": "error",
+                            "data": {"public_url": public_url}
+                        }), 500
+                    
+                    logger.info(f"Avatar group created successfully: {group_id}")
+                    
+                    # Step 3: Start training the avatar group
+                    train_payload = {
+                        "group_id": group_id
+                    }
+                    
+                    train_response = requests.post(
+                        "https://api.heygen.com/v2/photo_avatar/train",
+                        headers=group_headers,
+                        json=train_payload,
+                        timeout=30
+                    )
+                    
+                    logger.info(f"HeyGen training response: {train_response.status_code}")
+                    
+                    # Training request doesn't need to succeed for the avatar to be usable
+                    # Continue with database update
+                    
+                    # Step 4: Store avatar info in database
+                    db.update_influencer(influencer_id, {
+                        "original_asset_path": file_path,
+                        "heygen_avatar_id": group_id,  # Store group_id as avatar_id
+                        "heygen_asset_id": asset_id     # Store asset_id for reference
+                    })
+                    
+                    return jsonify({
+                        "message": "Custom avatar created successfully! Training has started and will complete shortly.",
+                        "status": "success",
+                        "data": {
+                            "path": file_path,
+                            "public_url": public_url,
+                            "avatar_id": group_id,
+                            "asset_id": asset_id,
+                            "asset_url": asset_url,
+                            "note": "Avatar group created and training started. It will be ready for video generation soon."
+                        }
+                    })
+                    
+                else:
+                    logger.error(f"HeyGen group creation failed: {group_response.status_code} - {group_response.text}")
+                    return jsonify({
+                        "message": f"Avatar group creation failed with status {group_response.status_code}",
+                        "status": "error",
+                        "data": {"public_url": public_url, "heygen_response": group_response.text}
+                    }), 500
+                    
+            elif upload_response.status_code == 401:
+                return jsonify({
+                    "message": "Invalid HeyGen API key - please check your configuration",
+                    "status": "error",
+                    "data": {"public_url": public_url}
+                }), 500
+                
+            elif upload_response.status_code == 403:
+                return jsonify({
+                    "message": "HeyGen API access forbidden - check your plan permissions",
+                    "status": "error",
+                    "data": {"public_url": public_url}
+                }), 500
+                
+            elif upload_response.status_code == 400:
+                error_details = upload_response.json() if upload_response.content else {}
+                return jsonify({
+                    "message": f"Invalid image for avatar creation: {error_details.get('message', 'Bad request')}",
+                    "status": "error",
+                    "data": {"public_url": public_url}
+                }), 400
+                
+            else:
+                logger.error(f"HeyGen upload API error: {upload_response.status_code} - {upload_response.text}")
+                return jsonify({
+                    "message": f"HeyGen upload failed with status {upload_response.status_code}. Please check your image and try again.",
+                    "status": "error",
+                    "data": {"public_url": public_url, "heygen_response": upload_response.text}
+                }), 500
+                
+        except requests.exceptions.Timeout:
+            return jsonify({
+                "message": "Request to HeyGen API timed out",
+                "status": "error",
+                "data": {"public_url": public_url}
+            }), 500
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"HeyGen API request failed: {str(e)}")
+            return jsonify({
+                "message": f"Failed to connect to HeyGen API: {str(e)}",
+                "status": "error",
+                "data": {"public_url": public_url}
+            }), 500
+
     except Exception as e:
         logger.error(f"Avatar creation failed: {str(e)}")
+        return jsonify({
+            "message": f"Avatar creation failed: {str(e)}",
+            "status": "error"
+        }), 500
+
+# Add endpoint to check avatar training status
+@app.route('/api/avatar/status/<avatar_id>', methods=['GET'])
+@influencer_token_required
+def check_avatar_status(current_user, avatar_id):
+    """Check the training status of a photo avatar group"""
+    try:
+        if not HEYGEN_API_KEY:
+            return jsonify({
+                "message": "HeyGen API key not configured",
+                "status": "error"
+            }), 500
+        
+        headers = {
+            "X-Api-Key": HEYGEN_API_KEY,
+            "Accept": "application/json"
+        }
+        
+        # Check avatar group status
+        response = requests.get(
+            f"https://api.heygen.com/v2/photo_avatar/avatar_group/{avatar_id}",
+            headers=headers,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            status_data = response.json()
+            avatar_status = status_data.get("data", {}).get("status", "unknown")
+            
+            return jsonify({
+                "status": "success",
+                "data": {
+                    "avatar_id": avatar_id,
+                    "training_status": avatar_status,
+                    "ready_for_video": avatar_status == "completed",
+                    "full_response": status_data
+                }
+            })
+        
+        else:
+            return jsonify({
+                "message": f"Failed to check avatar status: {response.status_code}",
+                "status": "error",
+                "details": response.text
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Avatar status check error: {str(e)}")
         return jsonify({
             "message": str(e),
             "status": "error"
         }), 500
 
+@app.route('/api/avatar/account-info', methods=['GET'])
+@influencer_token_required
+def get_heygen_account_info(current_user):
+    """Get HeyGen account information for debugging"""
+    try:
+        if not HEYGEN_API_KEY:
+            return jsonify({
+                "message": "HeyGen API key not configured",
+                "status": "error"
+            }), 500
+        
+        headers = {
+            "X-Api-Key": HEYGEN_API_KEY,
+            "Accept": "application/json"
+        }
+        
+        # Get account info
+        response = requests.get(
+            "https://api.heygen.com/v1/user/remaining_quota",
+            headers=headers,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            quota_data = response.json()
+            
+            # Also get avatars
+            avatars_response = requests.get(
+                "https://api.heygen.com/v2/avatars",
+                headers=headers,
+                timeout=10
+            )
+            
+            avatars_data = avatars_response.json() if avatars_response.status_code == 200 else {}
+            
+            return jsonify({
+                "status": "success",
+                "data": {
+                    "quota": quota_data.get("data", {}),
+                    "avatars_count": len(avatars_data.get("data", {}).get("avatars", [])),
+                    "api_working": True
+                }
+            })
+        
+        else:
+            return jsonify({
+                "message": f"Failed to get account info: {response.status_code}",
+                "status": "error"
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Account info error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+         
 # Affiliate Management
 @app.route('/api/affiliate', methods=['POST'])
 @influencer_token_required
@@ -834,9 +1060,8 @@ def get_available_voices():
 # Chat Functionality
 @app.route('/api/chat', methods=['POST'])
 def chat_message():
-    """Generate response using Chatbot with optional product recommendations and voice - No authentication required"""
+    """Generate response using Chatbot with better error handling and debugging"""
     try:
-        # Ensure JSON data is received
         data = request.get_json()
         if not data:
             return jsonify({
@@ -850,11 +1075,11 @@ def chat_message():
             "message": f"Invalid JSON data: {str(e)}"
         }), 400
 
-    # Extract required fields with error checking
+    # Extract required fields
     user_message = data.get("message", "").strip()
     influencer_id = data.get("influencer_id")
-    session_id = data.get("session_id")  # Optional session ID for conversation tracking
-    voice_mode = data.get("voice_mode", False)  # Default to false if not provided
+    session_id = data.get("session_id")
+    voice_mode = data.get("voice_mode", False)
 
     # Validate required fields
     if not user_message:
@@ -870,7 +1095,7 @@ def chat_message():
         }), 400
 
     try:
-        # 1. Get the influencer's details
+        # Get the influencer's details
         influencer = db.get_influencer(influencer_id)
         
         if not influencer:
@@ -881,18 +1106,18 @@ def chat_message():
         
         avatar_id = influencer.get("heygen_avatar_id")
         
-        if not avatar_id:
-            return jsonify({
-                "status": "error",
-                "message": "Influencer has no avatar. Please upload an image first."
-            }), 400
+        print(f"=== CHAT DEBUG INFO ===")
+        print(f"Influencer ID: {influencer_id}")
+        print(f"Avatar ID: {avatar_id}")
+        print(f"User message: {user_message}")
+        print(f"Voice mode: {voice_mode}")
         
-        # 2. Generate session ID if not provided
+        # Generate session ID if not provided
         if not session_id:
             import secrets
             session_id = secrets.token_hex(16)
         
-        # 3. Get response from Chatbot with product recommendations
+        # Get response from Chatbot (text only first)
         try:
             response = chatbot.get_response(
                 user_message, 
@@ -909,7 +1134,7 @@ def chat_message():
                 "message": f"Error generating response: {str(bot_error)}"
             }), 500
         
-        # 4. Log the interaction
+        # Log the interaction
         db.log_chat_interaction(
             influencer_id, 
             user_message, 
@@ -918,14 +1143,52 @@ def chat_message():
             session_id
         )
         
-        # 5. Prepare response data
+        # Prepare basic response
         response_data = {
             "text": response["text"],
-            "video_url": response.get("video_url", ""),
             "has_product_recommendations": response["has_product_recommendations"],
             "voice_mode": voice_mode,
-            "session_id": session_id  # Return session ID for future requests
+            "session_id": session_id,
+            "video_url": "",  # Initialize empty
+            "debug_info": {
+                "avatar_id": avatar_id,
+                "avatar_exists": bool(avatar_id),
+                "chat_response_length": len(response["chat_response"])
+            }
         }
+        
+        # Try to generate video only if avatar exists
+        if avatar_id:
+            try:
+                logger.info(f"Attempting video generation for avatar {avatar_id}")
+                
+                # First check if avatar is ready for video generation
+                avatar_ready = chatbot.check_avatar_ready_for_video(avatar_id)
+                response_data["debug_info"]["avatar_ready"] = avatar_ready
+                
+                if not avatar_ready:
+                    logger.warning(f"Avatar {avatar_id} not ready for video generation")
+                    response_data["debug_info"]["avatar_status"] = "not_ready"
+                else:
+                    # Generate video
+                    video_url = chatbot.generate_avatar_video(response["chat_response"], avatar_id)
+                    
+                    if video_url and video_url.strip():
+                        response_data["video_url"] = video_url
+                        response_data["debug_info"]["video_generation"] = "success"
+                        logger.info(f"Video generated successfully: {video_url}")
+                    else:
+                        response_data["debug_info"]["video_generation"] = "failed_empty_url"
+                        logger.warning("Video generation returned empty URL")
+                        
+            except Exception as video_error:
+                logger.error(f"Video generation error: {str(video_error)}")
+                response_data["debug_info"]["video_generation"] = f"error: {str(video_error)}"
+                # Don't fail the whole request if video fails
+                pass
+        else:
+            logger.warning(f"No avatar ID found for influencer {influencer_id}")
+            response_data["debug_info"]["avatar_status"] = "no_avatar_id"
         
         # Add audio URL if voice mode is enabled
         if voice_mode and "audio_url" in response:
@@ -937,28 +1200,34 @@ def chat_message():
         })
 
     except Exception as e:
-        logger.error(f"Chat endpoint unexpected error: {str(e)}")
+        logger.error(f"Chat endpoint error: {str(e)}")
         return jsonify({
             "status": "error",
-            "message": f"Unexpected server error: {str(e)}"
+            "message": f"Server error: {str(e)}"
         }), 500
 
 # Public chat page info
 @app.route('/api/chat/<username>', methods=['GET'])
 def get_public_chat_info(username):
-    """Get public chat page info for an influencer"""
+    """Get public chat page info for an influencer - ENHANCED VERSION"""
     try:
+        logger.info(f"Getting chat info for username: {username}")
+        
         # Get influencer details by username
         influencer = db.get_influencer_by_username(username)
         
         if not influencer:
+            logger.warning(f"Influencer '{username}' not found")
             return jsonify({
                 "message": f"Influencer '{username}' not found",
                 "status": "error"
             }), 404
         
+        logger.info(f"Found influencer: {influencer.get('id')} with avatar: {influencer.get('heygen_avatar_id')}")
+        
         # Check if influencer has an avatar
         if not influencer.get("heygen_avatar_id"):
+            logger.warning(f"Influencer {username} hasn't created their avatar yet")
             return jsonify({
                 "message": f"{username} hasn't created their avatar yet",
                 "status": "error"
@@ -971,6 +1240,8 @@ def get_public_chat_info(username):
         
         # Check if voice is configured
         has_voice = influencer.get("voice_id") is not None
+        
+        logger.info(f"Returning chat info for {username}: avatar_id={influencer.get('heygen_avatar_id')}, has_voice={has_voice}")
         
         return jsonify({
             "status": "success",
@@ -988,11 +1259,21 @@ def get_public_chat_info(username):
         })
     
     except Exception as e:
-        logger.error(f"Get public chat info error: {str(e)}")
+        logger.error(f"Get public chat info error for {username}: {str(e)}")
         return jsonify({
-            "message": str(e),
+            "message": f"Server error: {str(e)}",
             "status": "error"
         }), 500
+
+# Also add this OPTIONS handler to fix CORS preflight requests
+@app.route('/api/chat/<username>', methods=['OPTIONS'])
+def handle_chat_options(username):
+    """Handle CORS preflight requests for chat endpoint"""
+    response = jsonify({'status': 'ok'})
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    return response
 
 # Generate embed code for influencer
 @app.route('/api/embed/generate', methods=['POST'])
@@ -1305,60 +1586,6 @@ def get_embed_analytics(current_user):
             "status": "error"
         }), 500
     
-# Analytics
-@app.route('/api/analytics/dashboard', methods=['GET'])
-@influencer_token_required
-def get_dashboard_data(current_user):
-    """Get dashboard data for the influencer"""
-    try:
-        # Get recent chat interactions
-        interactions = admin_supabase.table("chat_interactions") \
-            .select("*") \
-            .eq("influencer_id", current_user["id"]) \
-            .order("created_at", {"ascending": False}) \
-            .limit(10) \
-            .execute()
-            
-        # Count total interactions
-        total_interactions = admin_supabase.table("chat_interactions") \
-            .select("count", {"count": "exact", "head": True}) \
-            .eq("influencer_id", current_user["id"]) \
-            .execute()
-            
-        # Count product recommendations
-        product_interactions = admin_supabase.table("chat_interactions") \
-            .select("count", {"count": "exact", "head": True}) \
-            .eq("influencer_id", current_user["id"]) \
-            .eq("product_recommendations", True) \
-            .execute()
-            
-        # Get profile info
-        bucket_name = "influencer-assets"
-        avatar_path = current_user.get("original_asset_path", "")
-        avatar_preview_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_name}/{avatar_path}" if avatar_path else ""
-            
-        return jsonify({
-            "status": "success",
-            "data": {
-                "username": current_user["username"],
-                "email": current_user["email"],
-                "profile_image": avatar_preview_url,
-                "recent_interactions": interactions.data,
-                "total_interactions": total_interactions.count if hasattr(total_interactions, 'count') else 0,
-                "product_interactions": product_interactions.count if hasattr(product_interactions, 'count') else 0,
-                "avatar_status": current_user.get("heygen_avatar_id") is not None,
-                "affiliate_status": current_user.get("affiliate_id") is not None,
-                "chat_page_url": f"/chat/{current_user['username']}"
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"Dashboard error: {str(e)}")
-        return jsonify({
-            "message": str(e),
-            "status": "error"
-        }), 500
-
 # Promotion Settings Endpoints
 @app.route('/api/promotion/settings', methods=['GET'])
 @influencer_token_required
@@ -1680,6 +1907,752 @@ def get_dashboard_data(current_user):
             "status": "error"
         }), 500
 
+def test_heygen_account_quota(self):
+    """Test HeyGen account and quota status"""
+    if not self.heygen_api_key:
+        print("ERROR: HeyGen API key not configured")
+        return False
+    
+    headers = {
+        "X-Api-Key": self.heygen_api_key,
+        "Accept": "application/json"
+    }
+    
+    try:
+        # Check account quota
+        response = requests.get(
+            "https://api.heygen.com/v1/user/remaining_quota",
+            headers=headers,
+            timeout=10
+        )
+        
+        print(f"Quota check response: {response.status_code}")
+        
+        if response.status_code == 200:
+            quota_data = response.json()
+            print(f"Account quota: {json.dumps(quota_data, indent=2)}")
+            
+            # Check if user has credits
+            data = quota_data.get("data", {})
+            remaining_quota = data.get("remaining_quota", 0)
+            
+            if remaining_quota <= 0:
+                print("WARNING: No remaining quota for video generation")
+                return False
+            else:
+                print(f"Remaining quota: {remaining_quota}")
+                return True
+                
+        elif response.status_code == 401:
+            print("ERROR: Invalid API key")
+            return False
+        elif response.status_code == 403:
+            print("ERROR: API access forbidden")
+            return False
+        else:
+            print(f"Quota check failed: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        print(f"Error checking quota: {str(e)}")
+        return False
+    
+@app.route('/api/avatar/debug/<influencer_id>', methods=['GET'])
+@influencer_token_required
+def debug_avatar_status(current_user, influencer_id):
+    """Enhanced debug endpoint to check avatar status with better type detection"""
+    try:
+        if current_user["id"] != influencer_id:
+            return jsonify({
+                "message": "Unauthorized",
+                "status": "error"
+            }), 403
+        
+        influencer = db.get_influencer(influencer_id)
+        if not influencer:
+            return jsonify({
+                "message": "Influencer not found",
+                "status": "error"
+            }), 404
+        
+        avatar_id = influencer.get("heygen_avatar_id")
+        
+        # Enhanced avatar type detection
+        def detect_avatar_type(avatar_id):
+            if not avatar_id:
+                return "none"
+            # Photo avatar groups are typically 32-character alphanumeric strings without underscores
+            if len(avatar_id) == 32 and avatar_id.replace('_', '').replace('-', '').isalnum() and '_' not in avatar_id and '-' not in avatar_id:
+                return "photo_avatar"
+            # Regular avatars often contain underscores, descriptive names, or dates
+            else:
+                return "regular_avatar"
+        
+        avatar_type = detect_avatar_type(avatar_id)
+        
+        debug_info = {
+            "influencer_id": influencer_id,
+            "username": influencer.get("username"),
+            "avatar_id": avatar_id,
+            "has_avatar_id": bool(avatar_id),
+            "avatar_type": avatar_type,
+            "avatar_ready": False,
+            "avatar_details": {},
+            "available_avatars_sample": []
+        }
+        
+        if avatar_id and chatbot.heygen_api_key:
+            # Check avatar readiness
+            debug_info["avatar_ready"] = chatbot.check_avatar_ready_for_video(avatar_id)
+            
+            # Get additional avatar information from HeyGen
+            headers = {
+                "X-Api-Key": chatbot.heygen_api_key,
+                "Accept": "application/json"
+            }
+            
+            try:
+                if avatar_type == "photo_avatar":
+                    # Get photo avatar details
+                    response = requests.get(
+                        f"https://api.heygen.com/v2/photo_avatar/{avatar_id}",
+                        headers=headers,
+                        timeout=10
+                    )
+                    if response.status_code == 200:
+                        debug_info["avatar_details"] = response.json().get("data", {})
+                
+                else:
+                    # Get regular avatars list and find this one
+                    response = requests.get(
+                        "https://api.heygen.com/v2/avatars",
+                        headers=headers,
+                        timeout=10
+                    )
+                    if response.status_code == 200:
+                        avatars_data = response.json()
+                        avatars = avatars_data.get("data", {}).get("avatars", [])
+                        
+                        # Find the specific avatar
+                        matching_avatar = next((avatar for avatar in avatars if avatar.get("avatar_id") == avatar_id), None)
+                        if matching_avatar:
+                            debug_info["avatar_details"] = matching_avatar
+                        
+                        # Provide sample of available avatars for debugging
+                        debug_info["available_avatars_sample"] = [
+                            {
+                                "avatar_id": avatar.get("avatar_id"),
+                                "name": avatar.get("name", "Unknown"),
+                                "gender": avatar.get("gender", "Unknown")
+                            }
+                            for avatar in avatars[:20]  # First 20 avatars
+                        ]
+                        
+                        # Check for similar avatar IDs
+                        similar_avatars = [
+                            avatar for avatar in avatars 
+                            if avatar_id.lower() in avatar.get("avatar_id", "").lower() or 
+                               avatar.get("avatar_id", "").lower() in avatar_id.lower()
+                        ]
+                        if similar_avatars:
+                            debug_info["similar_avatars"] = [
+                                {
+                                    "avatar_id": avatar.get("avatar_id"),
+                                    "name": avatar.get("name", "Unknown")
+                                }
+                                for avatar in similar_avatars
+                            ]
+            
+            except Exception as api_error:
+                debug_info["api_error"] = str(api_error)
+        
+        # Add database information
+        debug_info["database_info"] = {
+            "original_asset_path": influencer.get("original_asset_path"),
+            "avatar_training_status": influencer.get("avatar_training_status"),
+            "avatar_created_at": influencer.get("avatar_created_at"),
+            "heygen_image_key": influencer.get("heygen_image_key")
+        }
+        
+        return jsonify({
+            "status": "success",
+            "data": debug_info
+        })
+        
+    except Exception as e:
+        logger.error(f"Debug avatar error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+# Add a new endpoint to list available avatars
+@app.route('/api/avatar/available', methods=['GET'])
+@influencer_token_required
+def get_available_avatars(current_user):
+    """Get list of available HeyGen avatars"""
+    try:
+        if not HEYGEN_API_KEY:
+            return jsonify({
+                "message": "HeyGen API key not configured",
+                "status": "error"
+            }), 500
+        
+        headers = {
+            "X-Api-Key": HEYGEN_API_KEY,
+            "Accept": "application/json"
+        }
+        
+        # Get avatars list
+        response = requests.get(
+            "https://api.heygen.com/v2/avatars",
+            headers=headers,
+            timeout=15
+        )
+        
+        if response.status_code == 200:
+            avatars_data = response.json()
+            avatars = avatars_data.get("data", {}).get("avatars", [])
+            
+            # Format avatar data
+            formatted_avatars = [
+                {
+                    "avatar_id": avatar.get("avatar_id"),
+                    "name": avatar.get("name", "Unknown"),
+                    "gender": avatar.get("gender", "Unknown"),
+                    "preview_image": avatar.get("preview_image_url", ""),
+                    "preview_video": avatar.get("preview_video_url", "")
+                }
+                for avatar in avatars
+            ]
+            
+            return jsonify({
+                "status": "success",
+                "data": {
+                    "avatars": formatted_avatars,
+                    "total_count": len(formatted_avatars)
+                }
+            })
+        
+        else:
+            return jsonify({
+                "message": f"Failed to get avatars: {response.status_code}",
+                "status": "error",
+                "details": response.text
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Get available avatars error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+# Add this to main.py
+
+@app.route('/api/avatar/test-video', methods=['POST'])
+@influencer_token_required
+def test_video_generation(current_user):
+    """Test video generation with detailed debugging"""
+    try:
+        data = request.get_json()
+        test_text = data.get('text', 'Hello! This is a test of video generation.')
+        avatar_id = data.get('avatar_id') or current_user.get("heygen_avatar_id")
+        
+        if not avatar_id:
+            return jsonify({
+                "message": "No avatar ID provided or found in profile",
+                "status": "error"
+            }), 400
+        
+        print(f"Testing video generation for avatar: {avatar_id}")
+        
+        # First check quota
+        quota_ok = chatbot.test_heygen_account_quota()
+        
+        # Test video generation
+        video_url = chatbot.generate_avatar_video(test_text, avatar_id)
+        
+        return jsonify({
+            "status": "success" if video_url else "failed",
+            "data": {
+                "video_url": video_url,
+                "avatar_id": avatar_id,
+                "test_text": test_text,
+                "quota_ok": quota_ok,
+                "message": "Video generated successfully" if video_url else "Video generation failed - check logs"
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Test video generation error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+@app.route('/api/avatar/quota', methods=['GET'])
+@influencer_token_required  
+def check_heygen_quota(current_user):
+    """Check HeyGen account quota and status"""
+    try:
+        if not HEYGEN_API_KEY:
+            return jsonify({
+                "message": "HeyGen API key not configured",
+                "status": "error"
+            }), 500
+        
+        headers = {
+            "X-Api-Key": HEYGEN_API_KEY,
+            "Accept": "application/json"
+        }
+        
+        # Check quota
+        quota_response = requests.get(
+            "https://api.heygen.com/v1/user/remaining_quota",
+            headers=headers,
+            timeout=10
+        )
+        
+        quota_data = {}
+        if quota_response.status_code == 200:
+            quota_data = quota_response.json()
+        
+        # Check account info if available
+        account_response = requests.get(
+            "https://api.heygen.com/v1/user/remaining_quota",
+            headers=headers,
+            timeout=10
+        )
+        
+        return jsonify({
+            "status": "success",
+            "data": {
+                "quota_response_code": quota_response.status_code,
+                "quota_data": quota_data,
+                "api_key_valid": quota_response.status_code == 200,
+                "has_remaining_quota": quota_data.get("data", {}).get("remaining_quota", 0) > 0
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Check quota error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+# Add this to main.py for comprehensive HeyGen API testing
+
+@app.route('/api/avatar/diagnose', methods=['GET'])
+@influencer_token_required
+def diagnose_heygen_api(current_user):
+    """Comprehensive HeyGen API diagnostics"""
+    try:
+        if not HEYGEN_API_KEY:
+            return jsonify({
+                "message": "HeyGen API key not configured",
+                "status": "error"
+            }), 500
+        
+        headers = {
+            "X-Api-Key": HEYGEN_API_KEY,
+            "Accept": "application/json"
+        }
+        
+        diagnostics = {
+            "api_key_configured": bool(HEYGEN_API_KEY),
+            "api_key_length": len(HEYGEN_API_KEY) if HEYGEN_API_KEY else 0,
+            "tests": {}
+        }
+        
+        # Test 1: Basic API connectivity with avatars endpoint
+        try:
+            avatars_response = requests.get(
+                "https://api.heygen.com/v2/avatars",
+                headers=headers,
+                timeout=10
+            )
+            diagnostics["tests"]["avatars_endpoint"] = {
+                "status_code": avatars_response.status_code,
+                "success": avatars_response.status_code == 200,
+                "response_size": len(avatars_response.text),
+                "has_data": "avatars" in avatars_response.text.lower()
+            }
+            
+            if avatars_response.status_code == 200:
+                try:
+                    avatars_data = avatars_response.json()
+                    avatars_count = len(avatars_data.get("data", {}).get("avatars", []))
+                    diagnostics["tests"]["avatars_endpoint"]["avatar_count"] = avatars_count
+                except:
+                    pass
+                    
+        except Exception as e:
+            diagnostics["tests"]["avatars_endpoint"] = {
+                "error": str(e),
+                "success": False
+            }
+        
+        # Test 2: Voices endpoint
+        try:
+            voices_response = requests.get(
+                "https://api.heygen.com/v2/voices",
+                headers=headers,
+                timeout=10
+            )
+            diagnostics["tests"]["voices_endpoint"] = {
+                "status_code": voices_response.status_code,
+                "success": voices_response.status_code == 200,
+                "response_size": len(voices_response.text)
+            }
+            
+            if voices_response.status_code == 200:
+                try:
+                    voices_data = voices_response.json()
+                    voices_count = len(voices_data.get("data", {}).get("voices", []))
+                    diagnostics["tests"]["voices_endpoint"]["voice_count"] = voices_count
+                except:
+                    pass
+                    
+        except Exception as e:
+            diagnostics["tests"]["voices_endpoint"] = {
+                "error": str(e),
+                "success": False
+            }
+        
+        # Test 3: Try different quota endpoints
+        quota_endpoints = [
+            "https://api.heygen.com/v1/user/remaining_quota",
+            "https://api.heygen.com/v2/user/quota",
+            "https://api.heygen.com/v1/quota",
+            "https://api.heygen.com/v2/quota"
+        ]
+        
+        diagnostics["tests"]["quota_endpoints"] = {}
+        
+        for endpoint in quota_endpoints:
+            try:
+                quota_response = requests.get(endpoint, headers=headers, timeout=10)
+                diagnostics["tests"]["quota_endpoints"][endpoint] = {
+                    "status_code": quota_response.status_code,
+                    "success": quota_response.status_code == 200,
+                    "response": quota_response.text[:500] if quota_response.text else ""
+                }
+            except Exception as e:
+                diagnostics["tests"]["quota_endpoints"][endpoint] = {
+                    "error": str(e),
+                    "success": False
+                }
+        
+        # Test 4: Try a simple video generation (test mode)
+        test_payload = {
+            "video_inputs": [
+                {
+                    "character": {
+                        "type": "avatar",
+                        "avatar_id": "Abigail_expressive_2024112501",
+                        "avatar_style": "normal"
+                    },
+                    "voice": {
+                        "type": "text",
+                        "input_text": "Test",
+                        "voice_id": "2d5b0e6cf36f460aa7fc47e3eee4ba54"
+                    }
+                }
+            ],
+            "test": True,  # Test mode to avoid credit usage
+            "dimension": {
+                "width": 720,
+                "height": 480
+            }
+        }
+        
+        try:
+            video_response = requests.post(
+                "https://api.heygen.com/v2/video/generate",
+                headers={**headers, "Content-Type": "application/json"},
+                json=test_payload,
+                timeout=30
+            )
+            
+            diagnostics["tests"]["video_generation"] = {
+                "status_code": video_response.status_code,
+                "success": video_response.status_code == 200,
+                "response": video_response.text[:1000] if video_response.text else ""
+            }
+            
+            if video_response.status_code == 200:
+                try:
+                    video_data = video_response.json()
+                    video_id = video_data.get("data", {}).get("video_id")
+                    diagnostics["tests"]["video_generation"]["video_id"] = video_id
+                    diagnostics["tests"]["video_generation"]["has_video_id"] = bool(video_id)
+                except:
+                    pass
+                    
+        except Exception as e:
+            diagnostics["tests"]["video_generation"] = {
+                "error": str(e),
+                "success": False
+            }
+        
+        # Test 5: Account/user info endpoints
+        user_endpoints = [
+            "https://api.heygen.com/v1/user",
+            "https://api.heygen.com/v2/user",
+            "https://api.heygen.com/v1/account",
+            "https://api.heygen.com/v2/account"
+        ]
+        
+        diagnostics["tests"]["user_endpoints"] = {}
+        
+        for endpoint in user_endpoints:
+            try:
+                user_response = requests.get(endpoint, headers=headers, timeout=10)
+                diagnostics["tests"]["user_endpoints"][endpoint] = {
+                    "status_code": user_response.status_code,
+                    "success": user_response.status_code == 200,
+                    "response_snippet": user_response.text[:300] if user_response.text else ""
+                }
+            except Exception as e:
+                diagnostics["tests"]["user_endpoints"][endpoint] = {
+                    "error": str(e),
+                    "success": False
+                }
+        
+        # Summary
+        successful_tests = sum(1 for test_group in diagnostics["tests"].values() 
+                             for test in (test_group.values() if isinstance(test_group, dict) else [test_group]) 
+                             if isinstance(test, dict) and test.get("success", False))
+        
+        total_tests = sum(len(test_group) if isinstance(test_group, dict) else 1 
+                         for test_group in diagnostics["tests"].values())
+        
+        diagnostics["summary"] = {
+            "successful_tests": successful_tests,
+            "total_tests": total_tests,
+            "success_rate": f"{(successful_tests/total_tests*100):.1f}%" if total_tests > 0 else "0%",
+            "api_accessible": diagnostics["tests"].get("avatars_endpoint", {}).get("success", False),
+            "likely_issue": "API key invalid or no API access" if not diagnostics["tests"].get("avatars_endpoint", {}).get("success", False) else "Account limitations"
+        }
+        
+        return jsonify({
+            "status": "success",
+            "data": diagnostics
+        })
+        
+    except Exception as e:
+        logger.error(f"HeyGen diagnostics error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+# Also add a simple API key test
+@app.route('/api/avatar/test-key', methods=['GET'])
+@influencer_token_required
+def test_heygen_key(current_user):
+    """Simple HeyGen API key test"""
+    try:
+        if not HEYGEN_API_KEY:
+            return jsonify({
+                "message": "HeyGen API key not configured",
+                "status": "error",
+                "data": {
+                    "api_key_set": False,
+                    "recommendation": "Add HEYGEN_API_KEY to your environment variables"
+                }
+            }), 400
+        
+        headers = {
+            "X-Api-Key": HEYGEN_API_KEY,
+            "Accept": "application/json"
+        }
+        
+        # Test with the most basic endpoint
+        response = requests.get(
+            "https://api.heygen.com/v2/avatars",
+            headers=headers,
+            timeout=15
+        )
+        
+        result = {
+            "api_key_set": True,
+            "api_key_length": len(HEYGEN_API_KEY),
+            "status_code": response.status_code,
+            "response_size": len(response.text),
+            "success": response.status_code == 200
+        }
+        
+        if response.status_code == 200:
+            result["message"] = "API key is valid and working"
+            result["recommendation"] = "API access confirmed - check account plan for video generation limits"
+            try:
+                data = response.json()
+                avatar_count = len(data.get("data", {}).get("avatars", []))
+                result["available_avatars"] = avatar_count
+            except:
+                pass
+        elif response.status_code == 401:
+            result["message"] = "API key is invalid or expired"
+            result["recommendation"] = "Check your HeyGen API key in the dashboard"
+        elif response.status_code == 403:
+            result["message"] = "API key valid but access forbidden"
+            result["recommendation"] = "Your account may not have API access - upgrade to API plan"
+        elif response.status_code == 404:
+            result["message"] = "Endpoint not found"
+            result["recommendation"] = "API might not be available for your account type"
+        else:
+            result["message"] = f"Unexpected response: {response.status_code}"
+            result["recommendation"] = "Check HeyGen service status or contact support"
+            result["response_preview"] = response.text[:500]
+        
+        return jsonify({
+            "status": "success",
+            "data": result
+        })
+        
+    except requests.exceptions.Timeout:
+        return jsonify({
+            "message": "Request timed out",
+            "status": "error",
+            "data": {
+                "recommendation": "Check your internet connection or HeyGen service status"
+            }
+        }), 500
+        
+    except Exception as e:
+        logger.error(f"API key test error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+@app.route('/api/avatar/check-video/<video_id>', methods=['GET'])
+@influencer_token_required
+def check_video_status(current_user, video_id):
+    """Check the status of a specific video"""
+    try:
+        if not HEYGEN_API_KEY:
+            return jsonify({
+                "message": "HeyGen API key not configured",
+                "status": "error"
+            }), 500
+        
+        headers = {
+            "X-Api-Key": HEYGEN_API_KEY,
+            "Accept": "application/json"
+        }
+        
+        # Check video status
+        response = requests.get(
+            f"https://api.heygen.com/v1/video_status.get?video_id={video_id}",
+            headers=headers,
+            timeout=15
+        )
+        
+        result = {
+            "video_id": video_id,
+            "status_code": response.status_code,
+            "raw_response": response.text
+        }
+        
+        if response.status_code == 200:
+            try:
+                data = response.json()
+                result["parsed_data"] = data
+                
+                if "data" in data:
+                    video_data = data["data"]
+                    result["video_status"] = video_data.get("status")
+                    result["video_url"] = video_data.get("video_url")
+                    result["error"] = video_data.get("error")
+                    result["duration"] = video_data.get("duration")
+                    
+            except json.JSONDecodeError:
+                result["json_error"] = "Failed to parse response as JSON"
+        
+        return jsonify({
+            "status": "success",
+            "data": result
+        })
+        
+    except Exception as e:
+        logger.error(f"Check video status error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+@app.route('/api/debug/user/<username>', methods=['GET'])
+def debug_user_info(username):
+    """Debug endpoint to check user data"""
+    try:
+        # Get raw influencer data
+        influencer = db.get_influencer_by_username(username)
+        
+        debug_info = {
+            "username_searched": username,
+            "influencer_found": influencer is not None,
+            "raw_influencer_data": influencer if influencer else None
+        }
+        
+        if influencer:
+            debug_info.update({
+                "has_avatar_id": influencer.get("heygen_avatar_id") is not None,
+                "avatar_id": influencer.get("heygen_avatar_id"),
+                "has_voice_id": influencer.get("voice_id") is not None,
+                "voice_id": influencer.get("voice_id"),
+                "has_bio": influencer.get("bio") is not None,
+                "bio_length": len(influencer.get("bio", "")),
+                "original_asset_path": influencer.get("original_asset_path")
+            })
+            
+            # Check if we can generate the avatar preview URL
+            bucket_name = "influencer-assets"
+            avatar_path = influencer.get("original_asset_path", "")
+            if avatar_path:
+                avatar_preview_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_name}/{avatar_path}"
+                debug_info["avatar_preview_url"] = avatar_preview_url
+                debug_info["supabase_url"] = SUPABASE_URL
+        
+        return jsonify({
+            "status": "success",
+            "data": debug_info
+        })
+        
+    except Exception as e:
+        logger.error(f"Debug user error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+
+# Also add a test database connection endpoint
+@app.route('/api/debug/db-test', methods=['GET'])
+def test_database_connection():
+    """Test database connection and table access"""
+    try:
+        # Test getting all influencers (limited)
+        influencers = admin_supabase.table("influencers").select("username, id, heygen_avatar_id").limit(5).execute()
+        
+        return jsonify({
+            "status": "success",
+            "data": {
+                "database_connected": True,
+                "influencers_count": len(influencers.data),
+                "sample_usernames": [inf.get("username") for inf in influencers.data]
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Database test error: {str(e)}")
+        return jsonify({
+            "message": str(e),
+            "status": "error"
+        }), 500
+                  
 # Main Application Entry
 if __name__ == "__main__":
     # Make sure all required environment variables are set

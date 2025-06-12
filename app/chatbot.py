@@ -1,10 +1,12 @@
+# chatbot.py - Complete updated class
+
 import requests
 import os
 import time
 import tempfile
 import base64
 from typing import List, Dict, Optional
-
+import json
 from langchain_openai import ChatOpenAI
 from config import (
     OPENAI_API_KEY, 
@@ -17,7 +19,63 @@ from config import (
 from config import AFFILIATE_PLATFORMS, get_enabled_platforms, is_platform_enabled
 
 class Chatbot:
-    
+    def __init__(
+        self, 
+        db=None, 
+        llm=None, 
+        heygen_api_key=HEYGEN_API_KEY,
+        eleven_labs_api_key=ELEVEN_LABS_API_KEY
+    ):
+        # Language Model
+        self.llm = llm or ChatOpenAI(
+            openai_api_key=OPENAI_API_KEY, 
+            model="gpt-3.5-turbo"
+        )
+        
+        # API Keys
+        self.heygen_api_key = heygen_api_key
+        self.eleven_labs_api_key = eleven_labs_api_key
+        
+        # Rakuten API credentials
+        self.rakuten_merchant_id = RAKUTEN_MERCHANT_ID
+        self.rakuten_token = RAKUTEN_TOKEN
+        
+        # Database
+        self.db = db
+
+    def get_chat_response(self, message, influencer_id=None, session_id=None, influencer_name=None):
+        """Generate a conversational response with context."""
+        context = ""
+        
+        # Add influencer bio if available and relevant
+        if self.db and influencer_id:
+            influencer = self.db.get_influencer(influencer_id)
+            if influencer and influencer.get("bio"):
+                context += f"Influencer Bio: {influencer['bio']}\n\n"
+        
+        # Add chat history for context if session_id is provided
+        if self.db and influencer_id and session_id:
+            chat_history = self.db.get_chat_history(influencer_id, session_id, limit=5)
+            if chat_history:
+                context += "Recent conversation history:\n"
+                # Reverse to get chronological order
+                for chat in reversed(chat_history):
+                    context += f"User: {chat['user_message']}\n"
+                    context += f"You: {chat['bot_response']}\n"
+                context += "\n"
+        
+        prompt = f"""You are a friendly, helpful AI assistant for an influencer{' named ' + influencer_name if influencer_name else ''}. 
+        {context}
+        Respond to the following message in a conversational, engaging way:
+        
+        User message: {message}
+        
+        Keep your response concise (2-3 sentences max) and personable."""
+        
+        # Use the LLM to generate response
+        response = self.llm.invoke(prompt)
+        return response.content if hasattr(response, 'content') else str(response)
+
     def get_product_recommendations(self, query: str, influencer_id: str) -> str:
         """Fetch product recommendations with fallback mechanism for available platforms."""
         # Sanitize and clean the query
@@ -51,6 +109,16 @@ class Chatbot:
         except Exception as e:
             print(f"Product recommendation error: {str(e)}")
             return self.generate_fallback_recommendations(query)
+
+    def sanitize_query(self, query: str) -> str:
+        """Clean and prepare the query for product search."""
+        # Remove unnecessary words, limit length
+        stop_words = ['recommend', 'suggestions', 'products', 'buy', 'get', 'looking for']
+        for word in stop_words:
+            query = query.lower().replace(word, '').strip()
+        
+        # Truncate to reasonable length
+        return query[:50]
 
     def get_influencer_preferred_platform(self, influencer_id: str) -> str:
         """Get the influencer's preferred affiliate platform"""
@@ -172,6 +240,36 @@ class Chatbot:
             print(f"AI recommendation error: {str(e)}")
             return self.generate_fallback_recommendations(query)
 
+    def generate_fallback_recommendations(self, query: str) -> str:
+        """Generate a fallback recommendation message."""
+        fallback_message = f"""I couldn't find specific products for "{query}", 
+        but here are some general recommendations:\n\n"""
+        
+        generic_products = [
+            {"productname": "Versatile Tech Accessory", "price": "$49.99", "producturl": "#", "imageurl": ""},
+            {"productname": "Stylish Everyday Item", "price": "$29.99", "producturl": "#", "imageurl": ""},
+            {"productname": "Practical Lifestyle Product", "price": "$39.99", "producturl": "#", "imageurl": ""},
+            {"productname": "Trending Gadget", "price": "$79.99", "producturl": "#", "imageurl": ""},
+            {"productname": "Useful Companion Product", "price": "$59.99", "producturl": "#", "imageurl": ""}
+        ]
+        
+        return self.format_products(generic_products, "generic", "generic")
+
+    def transform_products(self, products: List[Dict], platform: str) -> List[Dict]:
+        """Transform various product formats to a standard format."""
+        standard_products = []
+        
+        for product in products[:5]:
+            standard_product = {
+                'productname': product.get('name', product.get('title', 'Unnamed Product')),
+                'price': product.get('price', product.get('regularPrice', 'N/A')),
+                'producturl': product.get('url', product.get('productUrl', '#')),
+                'imageurl': product.get('image', product.get('imageUrl', ''))
+            }
+            standard_products.append(standard_product)
+        
+        return standard_products
+
     def format_products(self, products: List[Dict], influencer_id: str, platform: str) -> str:
         """Format product recommendations with affiliate links"""
         if not products:
@@ -228,3 +326,713 @@ class Chatbot:
             return f"{base_url}?cid={affiliate_id}"
         else:
             return f"{base_url}?ref={affiliate_id}"
+
+    def analyze_message_for_product_intent(self, message):
+        """Determine if the message indicates product interest and extract query."""
+        # Keywords that suggest product interest
+        product_keywords = ["recommend", "suggest", "buy", "purchase", "product", 
+                        "shopping", "shop", "get", "want", "need", "looking for"]
+        
+        message_lower = message.lower()
+        
+        # Check if any keyword is in the message
+        for keyword in product_keywords:
+            if keyword in message_lower:
+                # Extract potential product query - everything after the keyword
+                query_start = message_lower.find(keyword) + len(keyword)
+                query = message[query_start:].strip()
+                
+                # If query is too short, use the whole message
+                if len(query) < 3:
+                    query = message
+                
+                return True, query
+        
+        return False, ""
+
+    def should_promote_product(self, influencer_id, session_id):
+        """Determine if it's time to promote a product based on conversation counter and settings"""
+        if not self.db or not session_id:
+            return False
+            
+        # Get promotion settings
+        settings = self.db.get_promotion_settings(influencer_id)
+        if not settings:
+            return False
+            
+        # If always promote at end is enabled, return True
+        if settings.get("promote_at_end", False):
+            return True
+            
+        # Get conversation counter
+        counter = self.db.get_conversation_counter(influencer_id, session_id)
+        if not counter:
+            return False
+            
+        # Check if we've reached the promotion frequency
+        message_count = counter.get("message_count", 0)
+        promotion_frequency = settings.get("promotion_frequency", 3)
+        
+        # Check if we've reached the frequency threshold (after incrementing counter)
+        return (message_count + 1) % promotion_frequency == 0
+
+    def get_product_query_for_promotion(self, influencer_id):
+        """Get the query to use for product promotion"""
+        if not self.db:
+            return None
+            
+        # Check for default product in settings
+        settings = self.db.get_promotion_settings(influencer_id)
+        if settings and settings.get("default_product"):
+            return settings.get("default_product")
+            
+        # Check for default product in products table
+        default_product = self.db.get_default_product(influencer_id)
+        if default_product:
+            return default_product.get("product_query")
+            
+        # No default product, return None
+        return None
+
+    def get_response(self, message, influencer_id, session_id=None, influencer_name=None, voice_mode=False, voice_id=None):
+        """Generate a response with optional product recommendations and voice."""
+        # Check if the message indicates product interest
+        is_product_query, product_query = self.analyze_message_for_product_intent(message)
+        
+        # Determine if we should promote a product based on conversation settings
+        should_promote = False
+        if session_id and self.db:
+            should_promote = self.should_promote_product(influencer_id, session_id)
+        
+        # Generate conversational response
+        chat_response = self.get_chat_response(message, influencer_id, session_id, influencer_name)
+        
+        # Handle product recommendations
+        full_response = chat_response
+        
+        # If explicit product interest is detected, use that query
+        if is_product_query:
+            product_recommendations = self.get_product_recommendations(product_query, influencer_id)
+            full_response = f"{chat_response}\n\n{product_recommendations}"
+            was_promotion = True
+        # Otherwise, if it's time to promote based on settings, use the default product
+        elif should_promote:
+            product_query = self.get_product_query_for_promotion(influencer_id)
+            if product_query:
+                product_recommendations = self.get_product_recommendations(product_query, influencer_id)
+                full_response = f"{chat_response}\n\n{product_recommendations}"
+                was_promotion = True
+            else:
+                was_promotion = False
+        else:
+            was_promotion = False
+        
+        # Update conversation counter if we have a session and db
+        if session_id and self.db:
+            self.db.increment_conversation_counter(influencer_id, session_id, was_promotion)
+        
+        # Generate video avatar for the chat response only (not including product recommendations)
+        video_url = self.generate_avatar_video(chat_response, influencer_id)
+        
+        # Generate audio if voice mode is enabled
+        audio_url = None
+        if voice_mode:
+            try:
+                # Attempt to generate audio, using voice_id if available
+                audio_url = self.generate_voice_audio(chat_response, voice_id)
+            except Exception as e:
+                print(f"Voice generation error: {str(e)}")
+                # Fallback to text if voice generation fails
+                audio_url = None
+            
+        return {
+            "text": full_response,
+            "chat_response": chat_response,  # Just the conversational part
+            "video_url": video_url,
+            "audio_url": audio_url,
+            "has_product_recommendations": is_product_query or was_promotion,
+            "voice_mode": voice_mode
+        }
+
+    def generate_avatar_video(self, text, avatar_id):
+        """Generate video using HeyGen API - FIXED VERSION"""
+        
+        if not self.heygen_api_key:
+            print("❌ ERROR: HeyGen API key not configured")
+            return ""
+        
+        print(f"🎬 === AVATAR VIDEO GENERATION ===")
+        print(f"🎭 Avatar ID: {avatar_id}")
+        print(f"📝 Text length: {len(text)} characters")
+        print(f"💬 Text: {text[:100]}..." if len(text) > 100 else f"💬 Text: {text}")
+        
+        headers = {
+            "X-Api-Key": self.heygen_api_key,
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+        
+        # Ensure text isn't too long (HeyGen limit is 1500 characters)
+        if len(text) > 1200:
+            text = text[:1197] + "..."
+            print(f"✂️  Text truncated to {len(text)} characters")
+        
+        # Get a working voice ID
+        voice_id = "2d5b0e6cf36f460aa7fc47e3eee4ba54"  # Default English voice
+        
+        # Create video payload
+        payload = {
+            "video_inputs": [
+                {
+                    "character": {
+                        "type": "avatar",
+                        "avatar_id": avatar_id,
+                        "avatar_style": "normal"
+                    },
+                    "voice": {
+                        "type": "text",
+                        "input_text": text,
+                        "voice_id": voice_id
+                    },
+                    "background": {
+                        "type": "color",
+                        "value": "#FFFFFF"
+                    }
+                }
+            ],
+            "dimension": {
+                "width": 720,
+                "height": 480
+            }
+        }
+        
+        print(f"📤 Sending request to HeyGen...")
+        
+        try:
+            # Generate video
+            response = requests.post(
+                "https://api.heygen.com/v2/video/generate",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+            
+            print(f"📥 HeyGen response: {response.status_code}")
+            
+            if response.status_code == 200:
+                try:
+                    video_data = response.json()
+                    print(f"📋 Response data: {json.dumps(video_data, indent=2)}")
+                    
+                    # Check for errors
+                    if video_data.get("error"):
+                        print(f"❌ API returned error: {video_data['error']}")
+                        return ""
+                    
+                    # Extract video ID
+                    video_id = video_data.get("data", {}).get("video_id")
+                    
+                    if not video_id:
+                        print(f"❌ No video_id in response")
+                        return ""
+                    
+                    print(f"🎬 Video generation started with ID: {video_id}")
+                    
+                    # Poll for completion
+                    return self._poll_video_status(video_id, headers)
+                    
+                except json.JSONDecodeError as e:
+                    print(f"❌ Failed to parse JSON: {e}")
+                    print(f"Raw response: {response.text}")
+                    return ""
+                    
+            else:
+                print(f"❌ Request failed with status {response.status_code}")
+                print(f"Response: {response.text}")
+                
+                # Handle specific error codes
+                if response.status_code == 400:
+                    try:
+                        error_data = response.json()
+                        error_code = error_data.get("code")
+                        if error_code == 40010:
+                            print("💳 Plan limitation: Higher resolution/features not available")
+                        elif error_code == 40001:
+                            print("💸 Insufficient credits")
+                    except:
+                        pass
+                elif response.status_code == 401:
+                    print("🔑 Unauthorized: Check API key")
+                elif response.status_code == 429:
+                    print("🚦 Rate limited: Too many requests")
+                
+                return ""
+                
+        except requests.exceptions.Timeout:
+            print("⏱️  Request timed out")
+            return ""
+        except requests.exceptions.RequestException as e:
+            print(f"🌐 Network error: {str(e)}")
+            return ""
+        except Exception as e:
+            print(f"❌ Unexpected error: {str(e)}")
+            return ""
+
+    def _poll_video_status(self, video_id, headers):
+        """Fixed video status polling - handles HeyGen API response format correctly"""
+        max_attempts = 30
+        attempt = 0
+        base_wait_time = 5
+        
+        print(f"Starting to poll video status for ID: {video_id}")
+        
+        while attempt < max_attempts:
+            try:
+                # Check video status using the correct endpoint
+                status_response = requests.get(
+                    f"https://api.heygen.com/v1/video_status.get?video_id={video_id}",
+                    headers=headers,
+                    timeout=15
+                )
+                
+                print(f"Attempt {attempt + 1}/{max_attempts}: Status check response: {status_response.status_code}")
+                
+                if status_response.status_code == 200:
+                    try:
+                        status_data = status_response.json()
+                        print(f"Raw status response: {json.dumps(status_data, indent=2)}")
+                        
+                        # Handle HeyGen's response format
+                        if "data" in status_data:
+                            data = status_data["data"]
+                            status = data.get("status", "unknown")
+                            video_url = data.get("video_url", "")
+                            error_info = data.get("error")
+                            
+                            print(f"Video status: {status}")
+                            
+                            if status == "completed":
+                                if video_url and video_url.strip():
+                                    print(f"✅ Video generation completed: {video_url}")
+                                    return video_url
+                                else:
+                                    print("❌ Video marked completed but no URL provided")
+                                    # Sometimes URL comes in next poll, continue for a few more attempts
+                                    if attempt < 5:
+                                        print("Continuing to poll for URL...")
+                                    else:
+                                        return ""
+                                    
+                            elif status == "failed":
+                                print(f"❌ Video generation failed: {error_info}")
+                                return ""
+                                
+                            elif status in ["processing", "pending", "waiting", "queued"]:
+                                print(f"🔄 Video status: {status}, waiting...")
+                                
+                            else:
+                                print(f"❓ Unknown status: {status}")
+                        
+                        else:
+                            print(f"⚠️  Unexpected response format: {status_data}")
+                            
+                    except json.JSONDecodeError as e:
+                        print(f"❌ Failed to parse JSON response: {e}")
+                        print(f"Raw response: {status_response.text[:500]}")
+                        
+                elif status_response.status_code == 404:
+                    print(f"❌ Video ID not found: {video_id}")
+                    return ""
+                    
+                elif status_response.status_code == 401:
+                    print(f"❌ Unauthorized - API key issue")
+                    return ""
+                    
+                else:
+                    print(f"⚠️  Status check failed: {status_response.status_code}")
+                    print(f"Response: {status_response.text[:300]}")
+            
+            except requests.exceptions.Timeout:
+                print(f"⏱️  Status check timed out (attempt {attempt + 1})")
+            except requests.exceptions.RequestException as e:
+                print(f"🌐 Network error during status check: {str(e)}")
+            except Exception as e:
+                print(f"❌ Unexpected error during status check: {str(e)}")
+            
+            # Dynamic wait time - longer waits for later attempts
+            wait_time = base_wait_time + (attempt // 5) * 2
+            print(f"⏳ Waiting {wait_time} seconds before next attempt...")
+            time.sleep(wait_time)
+            attempt += 1
+        
+        print(f"⏰ Video generation timed out after {max_attempts} attempts")
+        return ""
+
+    def check_avatar_ready_for_video(self, avatar_id):
+        """Check if avatar is ready for video generation - IMPROVED VERSION"""
+        
+        if not self.heygen_api_key:
+            print("ERROR: HeyGen API key not configured")
+            return False
+        
+        headers = {
+            "X-Api-Key": self.heygen_api_key,
+            "Accept": "application/json"
+        }
+        
+        try:
+            # Detect avatar type using the same logic as video generation
+            def detect_avatar_type(avatar_id):
+                if len(avatar_id) == 32 and avatar_id.replace('_', '').replace('-', '').isalnum() and '_' not in avatar_id and '-' not in avatar_id:
+                    return "photo_avatar"
+                else:
+                    return "regular_avatar"
+            
+            avatar_type = detect_avatar_type(avatar_id)
+            print(f"Checking avatar readiness for {avatar_type}: {avatar_id}")
+            
+            if avatar_type == "photo_avatar":
+                # Check photo avatar group status
+                response = requests.get(
+                    f"https://api.heygen.com/v2/photo_avatar/{avatar_id}",
+                    headers=headers,
+                    timeout=10
+                )
+                
+                print(f"Photo avatar status check: {response.status_code}")
+                print(f"Photo avatar response: {response.text}")
+                
+                if response.status_code == 200:
+                    avatar_data = response.json()
+                    status = avatar_data.get("data", {}).get("status", "unknown")
+                    print(f"Photo avatar status: {status}")
+                    return status in ["ready", "completed"]
+                    
+            else:
+                # For regular avatars, check if it exists in the avatars list
+                response = requests.get(
+                    "https://api.heygen.com/v2/avatars",
+                    headers=headers,
+                    timeout=10
+                )
+                
+                print(f"Regular avatars list check: {response.status_code}")
+                
+                if response.status_code == 200:
+                    avatars_data = response.json()
+                    avatars = avatars_data.get("data", {}).get("avatars", [])
+                    
+                    # Check if avatar_id exists in the list
+                    avatar_exists = any(avatar.get("avatar_id") == avatar_id for avatar in avatars)
+                    print(f"Regular avatar '{avatar_id}' exists: {avatar_exists}")
+                    
+                    if avatar_exists:
+                        return True
+                    else:
+                        # Avatar might be case-sensitive or have slight variations
+                        # Let's check for partial matches
+                        partial_matches = [avatar for avatar in avatars if avatar_id.lower() in avatar.get("avatar_id", "").lower()]
+                        if partial_matches:
+                            print(f"Found potential matches: {[a.get('avatar_id') for a in partial_matches]}")
+                            return True
+                    
+                    print(f"Available avatars: {[avatar.get('avatar_id') for avatar in avatars[:10]]}")  # Show first 10
+                    return False
+        
+        except Exception as e:
+            print(f"Error checking avatar status: {str(e)}")
+        
+        return False
+
+    def generate_voice_audio(self, text, voice_id=None):
+        """Generate audio using multiple TTS services with robust fallback."""
+        # List of TTS services to try
+        tts_services = [
+            self._generate_elevenlabs_audio,
+            self._generate_google_tts_audio,
+            self._generate_default_tts_audio
+        ]
+        
+        # Try each service until successful
+        for service in tts_services:
+            try:
+                audio_url = service(text, voice_id)
+                if audio_url:
+                    return audio_url
+            except Exception as e:
+                print(f"TTS service failed: {service.__name__}, Error: {str(e)}")
+        
+        # If all services fail, return None
+        return None
+    
+    def _generate_elevenlabs_audio(self, text, voice_id=None):
+        """Generate audio using ElevenLabs API"""
+        if not self.eleven_labs_api_key:
+            print("ElevenLabs API key not configured")
+            return None
+        
+        # If no specific voice ID is provided, use default
+        if not voice_id:
+            voice_id = "21m00Tcm4TlvDq8ikWAM"  # Default ElevenLabs voice
+        
+        headers = {
+            "xi-api-key": self.eleven_labs_api_key,
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "text": text,
+            "model_id": "eleven_monolingual_v1",
+            "voice_settings": {
+                "stability": 0.5,
+                "similarity_boost": 0.75
+            }
+        }
+        
+        try:
+            response = requests.post(
+                f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+                headers=headers,
+                json=payload,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                # Create a temporary file to store the audio
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
+                    temp_file.write(response.content)
+                    temp_filename = temp_file.name
+                
+                # Read file and convert to base64
+                with open(temp_filename, 'rb') as audio_file:
+                    audio_content = audio_file.read()
+                    audio_base64 = base64.b64encode(audio_content).decode('utf-8')
+                
+                # Clean up
+                try:
+                    os.remove(temp_filename)
+                except Exception as e:
+                    print(f"Warning: Could not remove temporary file: {str(e)}")
+                
+                return f"data:audio/mpeg;base64,{audio_base64}"
+            
+            print(f"ElevenLabs API error: {response.status_code} - {response.text}")
+            return None
+        
+        except Exception as e:
+            print(f"ElevenLabs audio generation error: {str(e)}")
+            return None
+
+    def _generate_google_tts_audio(self, text, voice_id=None):
+        """Generate audio using Google Text-to-Speech as a fallback"""
+        try:
+            from gtts import gTTS
+            import io
+            
+            # Create a text-to-speech object
+            tts = gTTS(text=text, lang='en', slow=False)
+            
+            # Save to a bytes buffer
+            mp3_fp = io.BytesIO()
+            tts.write_to_fp(mp3_fp)
+            mp3_fp.seek(0)
+            
+            # Convert to base64
+            audio_content = mp3_fp.read()
+            audio_base64 = base64.b64encode(audio_content).decode('utf-8')
+            
+            return f"data:audio/mpeg;base64,{audio_base64}"
+        
+        except ImportError:
+            print("gTTS library not installed. Install with: pip install gtts")
+            return None
+        except Exception as e:
+            print(f"Google TTS error: {str(e)}")
+            return None
+
+    def _generate_default_tts_audio(self, text, voice_id=None):
+        """Generate a basic synthetic audio as last resort"""
+        try:
+            # Simple synthetic audio generation
+            import numpy as np
+            from scipy.io import wavfile
+            import io
+            
+            # Generate a simple tone-based audio
+            duration = 2  # seconds
+            sample_rate = 44100
+            t = np.linspace(0, duration, int(sample_rate * duration), False)
+            
+            # Create a simple tone representing speech
+            audio = np.sin(2 * np.pi * 440 * t) * 0.3
+            
+            # Convert to 16-bit PCM
+            audio = (audio * 32767).astype(np.int16)
+            
+            # Save to bytes buffer
+            wav_buffer = io.BytesIO()
+            wavfile.write(wav_buffer, sample_rate, audio)
+            wav_buffer.seek(0)
+            
+            # Convert to base64
+            audio_content = wav_buffer.read()
+            audio_base64 = base64.b64encode(audio_content).decode('utf-8')
+            
+            return f"data:audio/wav;base64,{audio_base64}"
+        
+        except Exception as e:
+            print(f"Default audio generation error: {str(e)}")
+            return None
+    
+    def create_cloned_voice(self, name, audio_files, description=""):
+        """Create a cloned voice using ElevenLabs Voice Clone API"""
+        if not self.eleven_labs_api_key:
+            print("ElevenLabs API key not configured")
+            return None, "ElevenLabs API key not configured"
+            
+        headers = {
+            "xi-api-key": self.eleven_labs_api_key
+        }
+        
+        # ElevenLabs requires at least 1 minute of clear audio
+        # We'll assume the provided audio files meet this requirement
+        
+        # Prepare the form data
+        form_data = {
+            "name": name,
+            "description": description
+        }
+        
+        files = []
+        for i, audio_file in enumerate(audio_files):
+            # audio_file should be bytes or a file path
+            if isinstance(audio_file, bytes):
+                files.append(
+                    ('files', (f'sample_{i}.mp3', audio_file, 'audio/mpeg'))
+                )
+            else:
+                files.append(
+                    ('files', (f'sample_{i}.mp3', open(audio_file, 'rb'), 'audio/mpeg'))
+                )
+        
+        try:
+            response = requests.post(
+                "https://api.elevenlabs.io/v1/voices/add",
+                headers=headers,
+                data=form_data,
+                files=files
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                voice_id = result.get("voice_id")
+                return voice_id, "Voice created successfully"
+            else:
+                error_message = f"Error creating voice: {response.status_code} - {response.text}"
+                print(error_message)
+                return None, error_message
+        except Exception as e:
+            error_message = f"Exception creating voice: {str(e)}"
+            print(error_message)
+            return None, error_message
+        finally:
+            # Close file handles if we opened any
+            for file_tuple in files:
+                if not isinstance(file_tuple[1][1], bytes):
+                    file_tuple[1][1].close()
+    
+    def get_available_voices(self):
+        """Get list of available voices from ElevenLabs"""
+        if not self.eleven_labs_api_key:
+            print("ElevenLabs API key not configured")
+            return []
+            
+        headers = {
+            "xi-api-key": self.eleven_labs_api_key
+        }
+        
+        try:
+            response = requests.get(
+                "https://api.elevenlabs.io/v1/voices",
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                voices = result.get("voices", [])
+                
+                # Format voice data
+                formatted_voices = [
+                    {
+                        "voice_id": voice.get("voice_id"),
+                        "name": voice.get("name"),
+                        "preview_url": voice.get("preview_url"),
+                        "description": voice.get("description", "")
+                    }
+                    for voice in voices
+                ]
+                
+                return formatted_voices
+            else:
+                print(f"Error getting voices: {response.status_code} - {response.text}")
+                return []
+        except Exception as e:
+            print(f"Exception getting voices: {str(e)}")
+            return []
+    
+    def transcribe_audio(self, audio_file):
+        """Transcribe audio file to text using OpenAI Whisper API"""
+        if not OPENAI_API_KEY:
+            print("OpenAI API key not configured")
+            return None
+            
+        temp_file = None
+        temp_filename = None
+        
+        try:
+            # Use temporary file if audio_file is bytes
+            if isinstance(audio_file, bytes):
+                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
+                temp_filename = temp_file.name
+                temp_file.write(audio_file)
+                temp_file.close()  # Close the file explicitly before using it
+                audio_path = temp_filename
+            else:
+                audio_path = audio_file
+                
+            # Create a file object for the request
+            with open(audio_path, 'rb') as file_obj:
+                files = {'file': file_obj}
+                headers = {'Authorization': f'Bearer {OPENAI_API_KEY}'}
+                
+                response = requests.post(
+                    'https://api.openai.com/v1/audio/transcriptions',
+                    headers=headers,
+                    files=files,
+                    data={'model': 'whisper-1'}
+                )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return result.get('text')
+            else:
+                print(f"Error transcribing audio: {response.status_code} - {response.text}")
+                return None
+        except Exception as e:
+            print(f"Exception transcribing audio: {str(e)}")
+            return None
+        finally:
+            # Clean up temporary file if we created one
+            if temp_filename:
+                try:
+                    # Add a small delay to ensure file is released
+                    import time
+                    time.sleep(0.1)
+                    
+                    # Then try to remove it
+                    import os
+                    if os.path.exists(temp_filename):
+                        os.remove(temp_filename)
+                except Exception as e:
+                    print(f"Warning: Could not remove temporary file {temp_filename}: {str(e)}")
+                    # Continue execution even if cleanup fails

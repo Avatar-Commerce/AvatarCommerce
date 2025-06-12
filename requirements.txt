@@ -12,3 +12,4 @@ flasgger
 gunicorn
 pyjwt
 gtts
+pillow
