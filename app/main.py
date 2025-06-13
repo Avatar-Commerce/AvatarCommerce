@@ -11,7 +11,7 @@ from werkzeug.utils import secure_filename
 import requests
 import tempfile
 import base64
-
+import sys
 from app.config import (SUPABASE_URL, SUPABASE_KEY, HEYGEN_API_KEY, 
                    SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET_KEY)
 from app.config import ALL_AFFILIATE_PLATFORMS, get_enabled_platforms
@@ -40,30 +40,28 @@ file_handler.setFormatter(logging.Formatter(
 file_handler.setLevel(logging.INFO)
 logger.addHandler(file_handler)
 
+# Configure detailed logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s %(levelname)s %(name)s %(message)s',
+    handlers=[
+        logging.FileHandler('/tmp/flask_debug.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = JWT_SECRET_KEY
 app.config["DEBUG"] = True
 
-CORS(app, resources={
-    r"/api/*": {
-        "origins": [
-            "http://localhost:3000",
-            "http://127.0.0.1:3000", 
-            "http://localhost:5500",
-            "http://127.0.0.1:5500",
-            "http://avatarcommerce.s3-website-us-east-1.amazonaws.com",  # Your current S3 URL
-            "https://avatarcommerce.s3-website-us-east-1.amazonaws.com", # HTTPS version
-            "http://*.s3-website-us-east-1.amazonaws.com",  # Wildcard for S3
-            "https://*.s3-website-us-east-1.amazonaws.com", # HTTPS wildcard
-            "http://*.s3.amazonaws.com",  # Alternative S3 format
-            "https://*.s3.amazonaws.com", # HTTPS alternative
-            "*"  # Allow all origins for testing (remove in production)
-        ],
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
-        "supports_credentials": True
-    }
-})
+CORS(app, 
+     origins=["*"],  # Allow all origins for testing
+     allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     supports_credentials=True
+)
 
 # Initialize Supabase clients
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -74,13 +72,43 @@ db = Database()
 chatbot = Chatbot(db)  # Pass the db instance to chatbot
 
 @app.before_request
-def handle_preflight():
+def log_request_info():
+    logger.info('--- NEW REQUEST ---')
+    logger.info('Request Method: %s', request.method)
+    logger.info('Request URL: %s', request.url)
+    logger.info('Request Headers: %s', dict(request.headers))
+    logger.info('Request Origin: %s', request.headers.get('Origin', 'No Origin'))
+    logger.info('Request Remote Addr: %s', request.remote_addr)
+    
+    # Handle preflight OPTIONS requests
     if request.method == "OPTIONS":
+        logger.info('Handling OPTIONS preflight request')
         response = make_response()
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add('Access-Control-Allow-Headers', "*")
-        response.headers.add('Access-Control-Allow-Methods', "*")
+        origin = request.headers.get('Origin')
+        logger.info('Origin for CORS: %s', origin)
+        
+        # Allow the specific origin or all origins for testing
+        response.headers.add("Access-Control-Allow-Origin", origin or "*")
+        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,Accept,X-Requested-With")
+        response.headers.add('Access-Control-Allow-Methods', "GET,POST,PUT,DELETE,OPTIONS")
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        
+        logger.info('OPTIONS response headers: %s', dict(response.headers))
         return response
+
+@app.after_request
+def log_response_info(response):
+    logger.info('--- RESPONSE ---')
+    logger.info('Response Status: %s', response.status)
+    logger.info('Response Headers: %s', dict(response.headers))
+    
+    # Add CORS headers to all responses
+    origin = request.headers.get('Origin')
+    if origin:
+        response.headers.add('Access-Control-Allow-Origin', origin)
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+    
+    return response
     
 @app.route('/static/<path:filename>')
 def serve_static(filename):
@@ -2674,7 +2702,19 @@ def test_database_connection():
             "message": str(e),
             "status": "error"
         }), 500
-                  
+
+# Add a simple test endpoint
+@app.route('/api/test-cors', methods=['GET', 'POST', 'OPTIONS'])
+def test_cors():
+    logger.info('test-cors endpoint called')
+    return jsonify({
+        "status": "success",
+        "message": "CORS test successful",
+        "method": request.method,
+        "origin": request.headers.get('Origin', 'No Origin'),
+        "headers": dict(request.headers)
+    })
+                
 # Main Application Entry
 if __name__ == "__main__":
     # Make sure all required environment variables are set
