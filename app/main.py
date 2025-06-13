@@ -56,12 +56,23 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = JWT_SECRET_KEY
 app.config["DEBUG"] = True
 
-CORS(app, 
-     origins=["*"],  # Allow all origins for testing
-     allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
-     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-     supports_credentials=True
-)
+CORS(app, resources={
+    r"/api/*": {
+        "origins": [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:5500", 
+            "http://127.0.0.1:5500",
+            "http://avatarcommerce.s3-website-us-east-1.amazonaws.com",  # Your exact S3 URL
+            "https://avatarcommerce.s3-website-us-east-1.amazonaws.com", # HTTPS version
+            "*"  # Wildcard for testing - remove in production
+        ],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "Origin"],
+        "supports_credentials": False,
+        "send_wildcard": True
+    }
+})
 
 # Initialize Supabase clients
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -71,42 +82,47 @@ admin_supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 db = Database()
 chatbot = Chatbot(db)  # Pass the db instance to chatbot
 
+# Enhanced preflight handling
 @app.before_request
-def log_request_info():
-    logger.info('--- NEW REQUEST ---')
-    logger.info('Request Method: %s', request.method)
-    logger.info('Request URL: %s', request.url)
-    logger.info('Request Headers: %s', dict(request.headers))
-    logger.info('Request Origin: %s', request.headers.get('Origin', 'No Origin'))
-    logger.info('Request Remote Addr: %s', request.remote_addr)
-    
-    # Handle preflight OPTIONS requests
+def handle_preflight():
     if request.method == "OPTIONS":
-        logger.info('Handling OPTIONS preflight request')
-        response = make_response()
         origin = request.headers.get('Origin')
-        logger.info('Origin for CORS: %s', origin)
         
-        # Allow the specific origin or all origins for testing
-        response.headers.add("Access-Control-Allow-Origin", origin or "*")
-        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,Accept,X-Requested-With")
-        response.headers.add('Access-Control-Allow-Methods', "GET,POST,PUT,DELETE,OPTIONS")
-        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        print(f"🔄 OPTIONS preflight from: {origin}")
+        print(f"🔄 Expected origin: http://avatarcommerce.s3-website-us-east-1.amazonaws.com")
+        print(f"🔄 Origins match: {origin == 'http://avatarcommerce.s3-website-us-east-1.amazonaws.com'}")
         
-        logger.info('OPTIONS response headers: %s', dict(response.headers))
+        response = make_response()
+        
+        # Always allow your S3 origin
+        if origin == "http://avatarcommerce.s3-website-us-east-1.amazonaws.com":
+            response.headers.add("Access-Control-Allow-Origin", origin)
+        else:
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization,Accept,X-Requested-With,Origin")
+        response.headers.add("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
+        response.headers.add("Access-Control-Max-Age", "3600")
+        
+        print(f"🔄 Response headers: {dict(response.headers)}")
         return response
 
 @app.after_request
-def log_response_info(response):
-    logger.info('--- RESPONSE ---')
-    logger.info('Response Status: %s', response.status)
-    logger.info('Response Headers: %s', dict(response.headers))
-    
-    # Add CORS headers to all responses
+def after_request(response):
     origin = request.headers.get('Origin')
-    if origin:
+    
+    print(f"📝 {request.method} {request.path} from: {origin}")
+    
+    # Handle your specific S3 origin
+    if origin == "http://avatarcommerce.s3-website-us-east-1.amazonaws.com":
         response.headers.add('Access-Control-Allow-Origin', origin)
-        response.headers.add('Access-Control-Allow-Credentials', 'true')
+    elif origin:
+        response.headers.add('Access-Control-Allow-Origin', origin)
+    else:
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Origin')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
     
     return response
     
