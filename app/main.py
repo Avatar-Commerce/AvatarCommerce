@@ -18,6 +18,7 @@ from app.config import ALL_AFFILIATE_PLATFORMS, get_enabled_platforms
 from app.database import Database
 from app.chatbot import Chatbot
 from supabase import create_client, Client
+from flask import make_response
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -47,13 +48,20 @@ CORS(app, resources={
     r"/api/*": {
         "origins": [
             "http://localhost:3000",
-            "http://127.0.0.1:3000",
+            "http://127.0.0.1:3000", 
             "http://localhost:5500",
             "http://127.0.0.1:5500",
-            "http://avatarcommerce.s3-website-us-east-1.amazonaws.com"  # add this
+            "http://avatarcommerce.s3-website-us-east-1.amazonaws.com",  # Your current S3 URL
+            "https://avatarcommerce.s3-website-us-east-1.amazonaws.com", # HTTPS version
+            "http://*.s3-website-us-east-1.amazonaws.com",  # Wildcard for S3
+            "https://*.s3-website-us-east-1.amazonaws.com", # HTTPS wildcard
+            "http://*.s3.amazonaws.com",  # Alternative S3 format
+            "https://*.s3.amazonaws.com", # HTTPS alternative
+            "*"  # Allow all origins for testing (remove in production)
         ],
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"]
+        "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+        "supports_credentials": True
     }
 })
 
@@ -65,6 +73,15 @@ admin_supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 db = Database()
 chatbot = Chatbot(db)  # Pass the db instance to chatbot
 
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        response = make_response()
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "*")
+        response.headers.add('Access-Control-Allow-Methods', "*")
+        return response
+    
 @app.route('/static/<path:filename>')
 def serve_static(filename):
     return send_from_directory('static', filename)
