@@ -12,11 +12,11 @@ import requests
 import tempfile
 import base64
 
-from config import (SUPABASE_URL, SUPABASE_KEY, HEYGEN_API_KEY, 
+from app.config import (SUPABASE_URL, SUPABASE_KEY, HEYGEN_API_KEY, 
                    SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET_KEY)
-from config import ALL_AFFILIATE_PLATFORMS, get_enabled_platforms
-from database import Database
-from chatbot import Chatbot
+from app.config import ALL_AFFILIATE_PLATFORMS, get_enabled_platforms
+from app.database import Database
+from app.chatbot import Chatbot
 from supabase import create_client, Client
 
 # Configure logging

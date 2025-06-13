@@ -8,7 +8,7 @@ import base64
 from typing import List, Dict, Optional
 import json
 from langchain_openai import ChatOpenAI
-from config import (
+from app.config import (
     OPENAI_API_KEY, 
     RAKUTEN_MERCHANT_ID, 
     RAKUTEN_TOKEN,
@@ -16,7 +16,7 @@ from config import (
     ELEVEN_LABS_API_KEY
 )
 
-from config import AFFILIATE_PLATFORMS, get_enabled_platforms, is_platform_enabled
+from app.config import AFFILIATE_PLATFORMS, get_enabled_platforms, is_platform_enabled
 
 class Chatbot:
     def __init__(
