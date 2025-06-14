@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 import os
 import uuid
 import jwt
@@ -56,23 +56,13 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = JWT_SECRET_KEY
 app.config["DEBUG"] = True
 
-CORS(app, resources={
-    r"/api/*": {
-        "origins": [
-            "http://localhost:3000",
-            "http://127.0.0.1:3000",
-            "http://localhost:5500", 
-            "http://127.0.0.1:5500",
-            "http://avatarcommerce.s3-website-us-east-1.amazonaws.com",  # Your exact S3 URL
-            "https://avatarcommerce.s3-website-us-east-1.amazonaws.com", # HTTPS version
-            "*"  # Wildcard for testing - remove in production
-        ],
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With", "Origin"],
-        "supports_credentials": False,
-        "send_wildcard": True
-    }
-})
+CORS(app, 
+     origins=["*"],  # Allow all origins for debugging
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With", "Origin"],
+     supports_credentials=False,
+     automatic_options=True
+)
 
 # Initialize Supabase clients
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -89,40 +79,42 @@ def handle_preflight():
         origin = request.headers.get('Origin')
         
         print(f"🔄 OPTIONS preflight from: {origin}")
-        print(f"🔄 Expected origin: http://avatarcommerce.s3-website-us-east-1.amazonaws.com")
-        print(f"🔄 Origins match: {origin == 'http://avatarcommerce.s3-website-us-east-1.amazonaws.com'}")
+        print(f"🔄 Request path: {request.path}")
+        print(f"🔄 Request headers: {dict(request.headers)}")
         
-        response = make_response()
+        # Create a proper empty response for OPTIONS
+        response = make_response('', 200)  # Empty body with 200 status
         
-        # Always allow your S3 origin
-        if origin == "http://avatarcommerce.s3-website-us-east-1.amazonaws.com":
-            response.headers.add("Access-Control-Allow-Origin", origin)
-        else:
-            response.headers.add("Access-Control-Allow-Origin", "*")
-            
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization,Accept,X-Requested-With,Origin")
-        response.headers.add("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-        response.headers.add("Access-Control-Max-Age", "3600")
+        # Set CORS headers
+        response.headers['Access-Control-Allow-Origin'] = origin if origin else '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,Accept,X-Requested-With,Origin'
+        response.headers['Access-Control-Max-Age'] = '3600'
+        response.headers['Content-Length'] = '0'
         
-        print(f"🔄 Response headers: {dict(response.headers)}")
+        print(f"🔄 OPTIONS response status: 200")
+        print(f"🔄 OPTIONS response headers: {dict(response.headers)}")
+        
         return response
 
+# Ensure all actual requests have CORS headers
 @app.after_request
 def after_request(response):
     origin = request.headers.get('Origin')
     
-    print(f"📝 {request.method} {request.path} from: {origin}")
+    # Only log non-OPTIONS requests to reduce noise
+    if request.method != 'OPTIONS':
+        print(f"📝 {request.method} {request.path} from: {origin}")
+        print(f"📝 Response status: {response.status}")
     
-    # Handle your specific S3 origin
-    if origin == "http://avatarcommerce.s3-website-us-east-1.amazonaws.com":
-        response.headers.add('Access-Control-Allow-Origin', origin)
-    elif origin:
-        response.headers.add('Access-Control-Allow-Origin', origin)
+    # Add CORS headers to all responses
+    if origin:
+        response.headers['Access-Control-Allow-Origin'] = origin
     else:
-        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers['Access-Control-Allow-Origin'] = '*'
         
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Origin')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
+    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,Accept,X-Requested-With,Origin'
     
     return response
     
@@ -2722,14 +2714,37 @@ def test_database_connection():
 # Add a simple test endpoint
 @app.route('/api/test-cors', methods=['GET', 'POST', 'OPTIONS'])
 def test_cors():
-    logger.info('test-cors endpoint called')
-    return jsonify({
-        "status": "success",
-        "message": "CORS test successful",
-        "method": request.method,
-        "origin": request.headers.get('Origin', 'No Origin'),
-        "headers": dict(request.headers)
-    })
+    origin = request.headers.get('Origin', 'No Origin')
+    method = request.method
+    
+    print(f"✅ test-cors endpoint called: {method} from {origin}")
+    
+    # Handle different methods
+    if method == 'GET':
+        return jsonify({
+            "status": "success",
+            "message": "GET CORS test successful",
+            "method": method,
+            "origin": origin,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+    elif method == 'POST':
+        request_data = request.get_json() if request.is_json else {}
+        return jsonify({
+            "status": "success", 
+            "message": "POST CORS test successful",
+            "method": method,
+            "origin": origin,
+            "received_data": request_data,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+    else:
+        return jsonify({
+            "status": "success",
+            "message": f"{method} CORS test successful",
+            "method": method,
+            "origin": origin
+        })
                 
 # Main Application Entry
 if __name__ == "__main__":
