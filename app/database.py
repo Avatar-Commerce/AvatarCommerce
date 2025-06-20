@@ -743,3 +743,91 @@ class Database:
         except Exception as e:
             logger.error(f"Error getting chat history: {str(e)}")
             return []
+
+    def update_avatar_status(self, influencer_id: str, avatar_data: Dict) -> bool:
+        """Update avatar-related information for an influencer"""
+        try:
+            updates = {}
+            
+            # Add avatar-specific fields
+            if 'heygen_avatar_id' in avatar_data:
+                updates['heygen_avatar_id'] = avatar_data['heygen_avatar_id']
+            
+            if 'heygen_asset_id' in avatar_data:
+                updates['heygen_asset_id'] = avatar_data['heygen_asset_id']
+            
+            if 'original_asset_path' in avatar_data:
+                updates['original_asset_path'] = avatar_data['original_asset_path']
+            
+            if 'avatar_training_status' in avatar_data:
+                updates['avatar_training_status'] = avatar_data['avatar_training_status']
+            
+            if 'avatar_created_at' in avatar_data:
+                updates['avatar_created_at'] = avatar_data['avatar_created_at']
+            
+            if 'avatar_ready_at' in avatar_data:
+                updates['avatar_ready_at'] = avatar_data['avatar_ready_at']
+            
+            # Add timestamp
+            updates['updated_at'] = 'now()'
+            
+            # Update the influencer record
+            response = self.supabase.table('influencers') \
+                .update(updates) \
+                .eq('id', influencer_id) \
+                .execute()
+            
+            return len(response.data) > 0
+            
+        except Exception as e:
+            logger.error(f"Error updating avatar status: {str(e)}")
+            return False
+
+    def get_avatar_info(self, influencer_id: str) -> Optional[Dict]:
+        """Get avatar information for an influencer"""
+        try:
+            response = self.supabase.table('influencers') \
+                .select('heygen_avatar_id, heygen_asset_id, original_asset_path, avatar_training_status, avatar_created_at, avatar_ready_at') \
+                .eq('id', influencer_id) \
+                .execute()
+            
+            return response.data[0] if response.data else None
+            
+        except Exception as e:
+            logger.error(f"Error getting avatar info: {str(e)}")
+            return None
+
+    def set_avatar_ready(self, influencer_id: str) -> bool:
+        """Mark an avatar as ready for video generation"""
+        try:
+            updates = {
+                'avatar_training_status': 'completed',
+                'avatar_ready_at': 'now()',
+                'updated_at': 'now()'
+            }
+            
+            response = self.supabase.table('influencers') \
+                .update(updates) \
+                .eq('id', influencer_id) \
+                .execute()
+            
+            return len(response.data) > 0
+            
+        except Exception as e:
+            logger.error(f"Error setting avatar ready: {str(e)}")
+            return False
+
+    def get_influencers_with_pending_avatars(self) -> List[Dict]:
+        """Get influencers with avatars that are still training"""
+        try:
+            response = self.supabase.table('influencers') \
+                .select('id, username, heygen_avatar_id, avatar_training_status, avatar_created_at') \
+                .not_.is_('heygen_avatar_id', 'null') \
+                .in_('avatar_training_status', ['pending', 'processing', 'training']) \
+                .execute()
+            
+            return response.data
+            
+        except Exception as e:
+            logger.error(f"Error getting pending avatars: {str(e)}")
+            return []

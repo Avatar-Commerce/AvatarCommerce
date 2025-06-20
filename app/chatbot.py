@@ -8,7 +8,7 @@ import base64
 from typing import List, Dict, Optional
 import json
 from langchain_openai import ChatOpenAI
-from app.config import (
+from config import (
     OPENAI_API_KEY, 
     RAKUTEN_MERCHANT_ID, 
     RAKUTEN_TOKEN,
@@ -16,7 +16,9 @@ from app.config import (
     ELEVEN_LABS_API_KEY
 )
 
-from app.config import AFFILIATE_PLATFORMS, get_enabled_platforms, is_platform_enabled
+from config import AFFILIATE_PLATFORMS, get_enabled_platforms, is_platform_enabled
+
+from config import AFFILIATE_PLATFORMS, get_enabled_platforms, is_platform_enabled
 
 class Chatbot:
     def __init__(
@@ -42,6 +44,347 @@ class Chatbot:
         
         # Database
         self.db = db
+
+    def generate_avatar_video(self, text, influencer_id):
+        """Generate video using HeyGen API with proper avatar handling"""
+        
+        if not self.heygen_api_key:
+            print("❌ ERROR: HeyGen API key not configured")
+            return ""
+        
+        # Get the actual avatar ID from database
+        if self.db:
+            influencer = self.db.get_influencer(influencer_id)
+            if not influencer:
+                print(f"❌ ERROR: Influencer {influencer_id} not found")
+                return ""
+            
+            avatar_id = influencer.get("heygen_avatar_id")
+            if not avatar_id:
+                print(f"❌ ERROR: No avatar ID found for influencer {influencer_id}")
+                return ""
+        else:
+            avatar_id = influencer_id  # Fallback
+        
+        print(f"🎬 === AVATAR VIDEO GENERATION ===")
+        print(f"🎭 Influencer ID: {influencer_id}")
+        print(f"🎭 Avatar ID: {avatar_id}")
+        print(f"📝 Text length: {len(text)} characters")
+        print(f"💬 Text: {text[:100]}..." if len(text) > 100 else f"💬 Text: {text}")
+        
+        headers = {
+            "X-Api-Key": self.heygen_api_key,
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+        
+        # Ensure text isn't too long (HeyGen limit is 1500 characters)
+        if len(text) > 1200:
+            text = text[:1197] + "..."
+            print(f"✂️  Text truncated to {len(text)} characters")
+        
+        # Detect avatar type and use appropriate generation method
+        avatar_type = self._detect_avatar_type(avatar_id)
+        print(f"🔍 Detected avatar type: {avatar_type}")
+        
+        if avatar_type == "photo_avatar":
+            return self._generate_photo_avatar_video(text, avatar_id, headers)
+        else:
+            return self._generate_regular_avatar_video(text, avatar_id, headers)
+    
+    def _detect_avatar_type(self, avatar_id):
+        """Detect if avatar is a photo avatar or regular avatar"""
+        if not avatar_id:
+            return "unknown"
+        
+        # Photo avatar groups are typically 32-character hex strings
+        if len(avatar_id) == 32 and all(c in '0123456789abcdefABCDEF-' for c in avatar_id):
+            return "photo_avatar"
+        
+        # Regular avatars often contain underscores and descriptive names
+        return "regular_avatar"
+    
+    def _generate_photo_avatar_video(self, text, avatar_id, headers):
+        """Generate video using photo avatar (custom avatar)"""
+        print("📸 Using photo avatar generation method")
+        
+        # First check if the photo avatar is ready
+        status_response = requests.get(
+            f"https://api.heygen.com/v2/photo_avatar/{avatar_id}",
+            headers=headers,
+            timeout=10
+        )
+        
+        if status_response.status_code != 200:
+            print(f"❌ Photo avatar not found or not ready: {status_response.status_code}")
+            return ""
+        
+        status_data = status_response.json()
+        avatar_status = status_data.get("data", {}).get("status", "unknown")
+        
+        if avatar_status != "completed":
+            print(f"❌ Photo avatar not ready: {avatar_status}")
+            return ""
+        
+        # Get a working voice ID
+        voice_id = "2d5b0e6cf36f460aa7fc47e3eee4ba54"  # Default English voice
+        
+        # Create video payload for photo avatar
+        payload = {
+            "video_inputs": [
+                {
+                    "character": {
+                        "type": "photo_avatar",
+                        "photo_avatar_id": avatar_id
+                    },
+                    "voice": {
+                        "type": "text",
+                        "input_text": text,
+                        "voice_id": voice_id
+                    },
+                    "background": {
+                        "type": "color",
+                        "value": "#FFFFFF"
+                    }
+                }
+            ],
+            "dimension": {
+                "width": 720,
+                "height": 480
+            }
+        }
+        
+        return self._submit_video_generation(payload, headers)
+    
+    def _generate_regular_avatar_video(self, text, avatar_id, headers):
+        """Generate video using regular avatar (pre-made avatar)"""
+        print("👤 Using regular avatar generation method")
+        
+        # Get a working voice ID
+        voice_id = "2d5b0e6cf36f460aa7fc47e3eee4ba54"  # Default English voice
+        
+        # Create video payload for regular avatar
+        payload = {
+            "video_inputs": [
+                {
+                    "character": {
+                        "type": "avatar",
+                        "avatar_id": avatar_id,
+                        "avatar_style": "normal"
+                    },
+                    "voice": {
+                        "type": "text",
+                        "input_text": text,
+                        "voice_id": voice_id
+                    },
+                    "background": {
+                        "type": "color",
+                        "value": "#FFFFFF"
+                    }
+                }
+            ],
+            "dimension": {
+                "width": 720,
+                "height": 480
+            }
+        }
+        
+        return self._submit_video_generation(payload, headers)
+    
+    def _submit_video_generation(self, payload, headers):
+        """Submit video generation request and poll for completion"""
+        print(f"📤 Sending request to HeyGen...")
+        
+        try:
+            # Submit video generation request
+            response = requests.post(
+                "https://api.heygen.com/v2/video/generate",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+            
+            print(f"📥 HeyGen response: {response.status_code}")
+            
+            if response.status_code == 200:
+                try:
+                    video_data = response.json()
+                    print(f"📋 Response data: {json.dumps(video_data, indent=2)}")
+                    
+                    # Check for errors
+                    if video_data.get("error"):
+                        print(f"❌ API returned error: {video_data['error']}")
+                        return ""
+                    
+                    # Extract video ID
+                    video_id = video_data.get("data", {}).get("video_id")
+                    
+                    if not video_id:
+                        print(f"❌ No video_id in response")
+                        return ""
+                    
+                    print(f"🎬 Video generation started with ID: {video_id}")
+                    
+                    # Poll for completion with reduced timeout
+                    return self._poll_video_status(video_id, headers, max_attempts=20)
+                    
+                except json.JSONDecodeError as e:
+                    print(f"❌ Failed to parse JSON: {e}")
+                    print(f"Raw response: {response.text}")
+                    return ""
+                    
+            else:
+                print(f"❌ Request failed with status {response.status_code}")
+                print(f"Response: {response.text}")
+                return ""
+                
+        except requests.exceptions.Timeout:
+            print("⏱️  Request timed out")
+            return ""
+        except requests.exceptions.RequestException as e:
+            print(f"🌐 Network error: {str(e)}")
+            return ""
+        except Exception as e:
+            print(f"❌ Unexpected error: {str(e)}")
+            return ""
+
+    def _poll_video_status(self, video_id, headers, max_attempts=20):
+        """Poll video status with more efficient timing"""
+        attempt = 0
+        base_wait_time = 3  # Start with shorter wait times
+        
+        print(f"Starting to poll video status for ID: {video_id}")
+        
+        while attempt < max_attempts:
+            try:
+                # Check video status
+                status_response = requests.get(
+                    f"https://api.heygen.com/v1/video_status.get?video_id={video_id}",
+                    headers=headers,
+                    timeout=15
+                )
+                
+                print(f"Attempt {attempt + 1}/{max_attempts}: Status check response: {status_response.status_code}")
+                
+                if status_response.status_code == 200:
+                    try:
+                        status_data = status_response.json()
+                        
+                        if "data" in status_data:
+                            data = status_data["data"]
+                            status = data.get("status", "unknown")
+                            video_url = data.get("video_url", "")
+                            error_info = data.get("error")
+                            
+                            print(f"Video status: {status}")
+                            
+                            if status == "completed":
+                                if video_url and video_url.strip():
+                                    print(f"✅ Video generation completed: {video_url}")
+                                    return video_url
+                                else:
+                                    print("❌ Video marked completed but no URL provided")
+                                    if attempt < 3:  # Give it a few more chances
+                                        print("Continuing to poll for URL...")
+                                    else:
+                                        return ""
+                                    
+                            elif status == "failed":
+                                print(f"❌ Video generation failed: {error_info}")
+                                return ""
+                                
+                            elif status in ["processing", "pending", "waiting", "queued"]:
+                                print(f"🔄 Video status: {status}, waiting...")
+                                
+                            else:
+                                print(f"❓ Unknown status: {status}")
+                        
+                        else:
+                            print(f"⚠️  Unexpected response format: {status_data}")
+                            
+                    except json.JSONDecodeError as e:
+                        print(f"❌ Failed to parse JSON response: {e}")
+                        
+                elif status_response.status_code == 404:
+                    print(f"❌ Video ID not found: {video_id}")
+                    return ""
+                    
+                else:
+                    print(f"⚠️  Status check failed: {status_response.status_code}")
+            
+            except Exception as e:
+                print(f"❌ Error during status check: {str(e)}")
+            
+            # Dynamic wait time - longer waits for later attempts
+            wait_time = base_wait_time + (attempt // 5) * 2
+            print(f"⏳ Waiting {wait_time} seconds before next attempt...")
+            time.sleep(wait_time)
+            attempt += 1
+        
+        print(f"⏰ Video generation timed out after {max_attempts} attempts")
+        return ""
+
+    def check_avatar_ready_for_video(self, avatar_id):
+        """Check if avatar is ready for video generation"""
+        
+        if not self.heygen_api_key:
+            print("ERROR: HeyGen API key not configured")
+            return False
+        
+        headers = {
+            "X-Api-Key": self.heygen_api_key,
+            "Accept": "application/json"
+        }
+        
+        try:
+            avatar_type = self._detect_avatar_type(avatar_id)
+            print(f"Checking avatar readiness for {avatar_type}: {avatar_id}")
+            
+            if avatar_type == "photo_avatar":
+                # Check photo avatar status
+                response = requests.get(
+                    f"https://api.heygen.com/v2/photo_avatar/{avatar_id}",
+                    headers=headers,
+                    timeout=10
+                )
+                
+                print(f"Photo avatar status check: {response.status_code}")
+                
+                if response.status_code == 200:
+                    avatar_data = response.json()
+                    status = avatar_data.get("data", {}).get("status", "unknown")
+                    print(f"Photo avatar status: {status}")
+                    return status in ["completed", "ready"]
+                else:
+                    print(f"Photo avatar check failed: {response.text}")
+                    return False
+                    
+            else:
+                # For regular avatars, check if it exists in the avatars list
+                response = requests.get(
+                    "https://api.heygen.com/v2/avatars",
+                    headers=headers,
+                    timeout=10
+                )
+                
+                print(f"Regular avatars list check: {response.status_code}")
+                
+                if response.status_code == 200:
+                    avatars_data = response.json()
+                    avatars = avatars_data.get("data", {}).get("avatars", [])
+                    
+                    # Check if avatar_id exists in the list
+                    avatar_exists = any(avatar.get("avatar_id") == avatar_id for avatar in avatars)
+                    print(f"Regular avatar '{avatar_id}' exists: {avatar_exists}")
+                    
+                    return avatar_exists
+                else:
+                    print(f"Failed to get avatars list: {response.text}")
+                    return False
+        
+        except Exception as e:
+            print(f"Error checking avatar status: {str(e)}")
+            return False
 
     def get_chat_response(self, message, influencer_id=None, session_id=None, influencer_name=None):
         """Generate a conversational response with context."""
@@ -75,6 +418,69 @@ class Chatbot:
         # Use the LLM to generate response
         response = self.llm.invoke(prompt)
         return response.content if hasattr(response, 'content') else str(response)
+
+    def get_response(self, message, influencer_id, session_id=None, influencer_name=None, voice_mode=False, voice_id=None):
+        """Generate a response with optional product recommendations and voice."""
+        # Check if the message indicates product interest
+        is_product_query, product_query = self.analyze_message_for_product_intent(message)
+        
+        # Determine if we should promote a product based on conversation settings
+        should_promote = False
+        if session_id and self.db:
+            should_promote = self.should_promote_product(influencer_id, session_id)
+        
+        # Generate conversational response
+        chat_response = self.get_chat_response(message, influencer_id, session_id, influencer_name)
+        
+        # Handle product recommendations
+        full_response = chat_response
+        
+        # If explicit product interest is detected, use that query
+        if is_product_query:
+            product_recommendations = self.get_product_recommendations(product_query, influencer_id)
+            full_response = f"{chat_response}\n\n{product_recommendations}"
+            was_promotion = True
+        # Otherwise, if it's time to promote based on settings, use the default product
+        elif should_promote:
+            product_query = self.get_product_query_for_promotion(influencer_id)
+            if product_query:
+                product_recommendations = self.get_product_recommendations(product_query, influencer_id)
+                full_response = f"{chat_response}\n\n{product_recommendations}"
+                was_promotion = True
+            else:
+                was_promotion = False
+        else:
+            was_promotion = False
+        
+        # Update conversation counter if we have a session and db
+        if session_id and self.db:
+            self.db.increment_conversation_counter(influencer_id, session_id, was_promotion)
+        
+        # Generate video avatar for the chat response only (not including product recommendations)
+        video_url = self.generate_avatar_video(chat_response, influencer_id)
+        
+        # Generate audio if voice mode is enabled
+        audio_url = None
+        if voice_mode:
+            try:
+                # Use the influencer's voice if available, otherwise default
+                if voice_id:
+                    audio_url = self.generate_voice_audio(chat_response, voice_id)
+                else:
+                    audio_url = self.generate_voice_audio(chat_response)
+            except Exception as e:
+                print(f"Voice generation error: {str(e)}")
+                audio_url = None
+            
+        return {
+            "text": full_response,
+            "chat_response": chat_response,  # Just the conversational part
+            "video_url": video_url,
+            "audio_url": audio_url,
+            "has_product_recommendations": is_product_query or was_promotion,
+            "voice_mode": voice_mode
+        }
+
 
     def get_product_recommendations(self, query: str, influencer_id: str) -> str:
         """Fetch product recommendations with fallback mechanism for available platforms."""
@@ -393,356 +799,6 @@ class Chatbot:
             
         # No default product, return None
         return None
-
-    def get_response(self, message, influencer_id, session_id=None, influencer_name=None, voice_mode=False, voice_id=None):
-        """Generate a response with optional product recommendations and voice."""
-        # Check if the message indicates product interest
-        is_product_query, product_query = self.analyze_message_for_product_intent(message)
-        
-        # Determine if we should promote a product based on conversation settings
-        should_promote = False
-        if session_id and self.db:
-            should_promote = self.should_promote_product(influencer_id, session_id)
-        
-        # Generate conversational response
-        chat_response = self.get_chat_response(message, influencer_id, session_id, influencer_name)
-        
-        # Handle product recommendations
-        full_response = chat_response
-        
-        # If explicit product interest is detected, use that query
-        if is_product_query:
-            product_recommendations = self.get_product_recommendations(product_query, influencer_id)
-            full_response = f"{chat_response}\n\n{product_recommendations}"
-            was_promotion = True
-        # Otherwise, if it's time to promote based on settings, use the default product
-        elif should_promote:
-            product_query = self.get_product_query_for_promotion(influencer_id)
-            if product_query:
-                product_recommendations = self.get_product_recommendations(product_query, influencer_id)
-                full_response = f"{chat_response}\n\n{product_recommendations}"
-                was_promotion = True
-            else:
-                was_promotion = False
-        else:
-            was_promotion = False
-        
-        # Update conversation counter if we have a session and db
-        if session_id and self.db:
-            self.db.increment_conversation_counter(influencer_id, session_id, was_promotion)
-        
-        # Generate video avatar for the chat response only (not including product recommendations)
-        video_url = self.generate_avatar_video(chat_response, influencer_id)
-        
-        # Generate audio if voice mode is enabled
-        audio_url = None
-        if voice_mode:
-            try:
-                # Attempt to generate audio, using voice_id if available
-                audio_url = self.generate_voice_audio(chat_response, voice_id)
-            except Exception as e:
-                print(f"Voice generation error: {str(e)}")
-                # Fallback to text if voice generation fails
-                audio_url = None
-            
-        return {
-            "text": full_response,
-            "chat_response": chat_response,  # Just the conversational part
-            "video_url": video_url,
-            "audio_url": audio_url,
-            "has_product_recommendations": is_product_query or was_promotion,
-            "voice_mode": voice_mode
-        }
-
-    def generate_avatar_video(self, text, avatar_id):
-        """Generate video using HeyGen API - FIXED VERSION"""
-        
-        if not self.heygen_api_key:
-            print("❌ ERROR: HeyGen API key not configured")
-            return ""
-        
-        print(f"🎬 === AVATAR VIDEO GENERATION ===")
-        print(f"🎭 Avatar ID: {avatar_id}")
-        print(f"📝 Text length: {len(text)} characters")
-        print(f"💬 Text: {text[:100]}..." if len(text) > 100 else f"💬 Text: {text}")
-        
-        headers = {
-            "X-Api-Key": self.heygen_api_key,
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }
-        
-        # Ensure text isn't too long (HeyGen limit is 1500 characters)
-        if len(text) > 1200:
-            text = text[:1197] + "..."
-            print(f"✂️  Text truncated to {len(text)} characters")
-        
-        # Get a working voice ID
-        voice_id = "2d5b0e6cf36f460aa7fc47e3eee4ba54"  # Default English voice
-        
-        # Create video payload
-        payload = {
-            "video_inputs": [
-                {
-                    "character": {
-                        "type": "avatar",
-                        "avatar_id": avatar_id,
-                        "avatar_style": "normal"
-                    },
-                    "voice": {
-                        "type": "text",
-                        "input_text": text,
-                        "voice_id": voice_id
-                    },
-                    "background": {
-                        "type": "color",
-                        "value": "#FFFFFF"
-                    }
-                }
-            ],
-            "dimension": {
-                "width": 720,
-                "height": 480
-            }
-        }
-        
-        print(f"📤 Sending request to HeyGen...")
-        
-        try:
-            # Generate video
-            response = requests.post(
-                "https://api.heygen.com/v2/video/generate",
-                headers=headers,
-                json=payload,
-                timeout=60
-            )
-            
-            print(f"📥 HeyGen response: {response.status_code}")
-            
-            if response.status_code == 200:
-                try:
-                    video_data = response.json()
-                    print(f"📋 Response data: {json.dumps(video_data, indent=2)}")
-                    
-                    # Check for errors
-                    if video_data.get("error"):
-                        print(f"❌ API returned error: {video_data['error']}")
-                        return ""
-                    
-                    # Extract video ID
-                    video_id = video_data.get("data", {}).get("video_id")
-                    
-                    if not video_id:
-                        print(f"❌ No video_id in response")
-                        return ""
-                    
-                    print(f"🎬 Video generation started with ID: {video_id}")
-                    
-                    # Poll for completion
-                    return self._poll_video_status(video_id, headers)
-                    
-                except json.JSONDecodeError as e:
-                    print(f"❌ Failed to parse JSON: {e}")
-                    print(f"Raw response: {response.text}")
-                    return ""
-                    
-            else:
-                print(f"❌ Request failed with status {response.status_code}")
-                print(f"Response: {response.text}")
-                
-                # Handle specific error codes
-                if response.status_code == 400:
-                    try:
-                        error_data = response.json()
-                        error_code = error_data.get("code")
-                        if error_code == 40010:
-                            print("💳 Plan limitation: Higher resolution/features not available")
-                        elif error_code == 40001:
-                            print("💸 Insufficient credits")
-                    except:
-                        pass
-                elif response.status_code == 401:
-                    print("🔑 Unauthorized: Check API key")
-                elif response.status_code == 429:
-                    print("🚦 Rate limited: Too many requests")
-                
-                return ""
-                
-        except requests.exceptions.Timeout:
-            print("⏱️  Request timed out")
-            return ""
-        except requests.exceptions.RequestException as e:
-            print(f"🌐 Network error: {str(e)}")
-            return ""
-        except Exception as e:
-            print(f"❌ Unexpected error: {str(e)}")
-            return ""
-
-    def _poll_video_status(self, video_id, headers):
-        """Fixed video status polling - handles HeyGen API response format correctly"""
-        max_attempts = 30
-        attempt = 0
-        base_wait_time = 5
-        
-        print(f"Starting to poll video status for ID: {video_id}")
-        
-        while attempt < max_attempts:
-            try:
-                # Check video status using the correct endpoint
-                status_response = requests.get(
-                    f"https://api.heygen.com/v1/video_status.get?video_id={video_id}",
-                    headers=headers,
-                    timeout=15
-                )
-                
-                print(f"Attempt {attempt + 1}/{max_attempts}: Status check response: {status_response.status_code}")
-                
-                if status_response.status_code == 200:
-                    try:
-                        status_data = status_response.json()
-                        print(f"Raw status response: {json.dumps(status_data, indent=2)}")
-                        
-                        # Handle HeyGen's response format
-                        if "data" in status_data:
-                            data = status_data["data"]
-                            status = data.get("status", "unknown")
-                            video_url = data.get("video_url", "")
-                            error_info = data.get("error")
-                            
-                            print(f"Video status: {status}")
-                            
-                            if status == "completed":
-                                if video_url and video_url.strip():
-                                    print(f"✅ Video generation completed: {video_url}")
-                                    return video_url
-                                else:
-                                    print("❌ Video marked completed but no URL provided")
-                                    # Sometimes URL comes in next poll, continue for a few more attempts
-                                    if attempt < 5:
-                                        print("Continuing to poll for URL...")
-                                    else:
-                                        return ""
-                                    
-                            elif status == "failed":
-                                print(f"❌ Video generation failed: {error_info}")
-                                return ""
-                                
-                            elif status in ["processing", "pending", "waiting", "queued"]:
-                                print(f"🔄 Video status: {status}, waiting...")
-                                
-                            else:
-                                print(f"❓ Unknown status: {status}")
-                        
-                        else:
-                            print(f"⚠️  Unexpected response format: {status_data}")
-                            
-                    except json.JSONDecodeError as e:
-                        print(f"❌ Failed to parse JSON response: {e}")
-                        print(f"Raw response: {status_response.text[:500]}")
-                        
-                elif status_response.status_code == 404:
-                    print(f"❌ Video ID not found: {video_id}")
-                    return ""
-                    
-                elif status_response.status_code == 401:
-                    print(f"❌ Unauthorized - API key issue")
-                    return ""
-                    
-                else:
-                    print(f"⚠️  Status check failed: {status_response.status_code}")
-                    print(f"Response: {status_response.text[:300]}")
-            
-            except requests.exceptions.Timeout:
-                print(f"⏱️  Status check timed out (attempt {attempt + 1})")
-            except requests.exceptions.RequestException as e:
-                print(f"🌐 Network error during status check: {str(e)}")
-            except Exception as e:
-                print(f"❌ Unexpected error during status check: {str(e)}")
-            
-            # Dynamic wait time - longer waits for later attempts
-            wait_time = base_wait_time + (attempt // 5) * 2
-            print(f"⏳ Waiting {wait_time} seconds before next attempt...")
-            time.sleep(wait_time)
-            attempt += 1
-        
-        print(f"⏰ Video generation timed out after {max_attempts} attempts")
-        return ""
-
-    def check_avatar_ready_for_video(self, avatar_id):
-        """Check if avatar is ready for video generation - IMPROVED VERSION"""
-        
-        if not self.heygen_api_key:
-            print("ERROR: HeyGen API key not configured")
-            return False
-        
-        headers = {
-            "X-Api-Key": self.heygen_api_key,
-            "Accept": "application/json"
-        }
-        
-        try:
-            # Detect avatar type using the same logic as video generation
-            def detect_avatar_type(avatar_id):
-                if len(avatar_id) == 32 and avatar_id.replace('_', '').replace('-', '').isalnum() and '_' not in avatar_id and '-' not in avatar_id:
-                    return "photo_avatar"
-                else:
-                    return "regular_avatar"
-            
-            avatar_type = detect_avatar_type(avatar_id)
-            print(f"Checking avatar readiness for {avatar_type}: {avatar_id}")
-            
-            if avatar_type == "photo_avatar":
-                # Check photo avatar group status
-                response = requests.get(
-                    f"https://api.heygen.com/v2/photo_avatar/{avatar_id}",
-                    headers=headers,
-                    timeout=10
-                )
-                
-                print(f"Photo avatar status check: {response.status_code}")
-                print(f"Photo avatar response: {response.text}")
-                
-                if response.status_code == 200:
-                    avatar_data = response.json()
-                    status = avatar_data.get("data", {}).get("status", "unknown")
-                    print(f"Photo avatar status: {status}")
-                    return status in ["ready", "completed"]
-                    
-            else:
-                # For regular avatars, check if it exists in the avatars list
-                response = requests.get(
-                    "https://api.heygen.com/v2/avatars",
-                    headers=headers,
-                    timeout=10
-                )
-                
-                print(f"Regular avatars list check: {response.status_code}")
-                
-                if response.status_code == 200:
-                    avatars_data = response.json()
-                    avatars = avatars_data.get("data", {}).get("avatars", [])
-                    
-                    # Check if avatar_id exists in the list
-                    avatar_exists = any(avatar.get("avatar_id") == avatar_id for avatar in avatars)
-                    print(f"Regular avatar '{avatar_id}' exists: {avatar_exists}")
-                    
-                    if avatar_exists:
-                        return True
-                    else:
-                        # Avatar might be case-sensitive or have slight variations
-                        # Let's check for partial matches
-                        partial_matches = [avatar for avatar in avatars if avatar_id.lower() in avatar.get("avatar_id", "").lower()]
-                        if partial_matches:
-                            print(f"Found potential matches: {[a.get('avatar_id') for a in partial_matches]}")
-                            return True
-                    
-                    print(f"Available avatars: {[avatar.get('avatar_id') for avatar in avatars[:10]]}")  # Show first 10
-                    return False
-        
-        except Exception as e:
-            print(f"Error checking avatar status: {str(e)}")
-        
-        return False
 
     def generate_voice_audio(self, text, voice_id=None):
         """Generate audio using multiple TTS services with robust fallback."""
