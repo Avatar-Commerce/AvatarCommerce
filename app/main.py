@@ -6,6 +6,7 @@ import jwt
 import hashlib
 import logging
 from logging.handlers import RotatingFileHandler
+import logging.handlers
 from datetime import datetime, timedelta
 from werkzeug.utils import secure_filename
 import requests
@@ -28,8 +29,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Create logs directory if it doesn't exist
-if not os.path.exists('logs'):
-    os.makedirs('logs')
+logs_dir = os.path.join(os.path.dirname(__file__), 'logs')
+os.makedirs(logs_dir, exist_ok=True)
 
 # Add file handler
 file_handler = RotatingFileHandler(
@@ -54,6 +55,78 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+# Configure logging with better Windows compatibility
+def setup_logging():
+    """Set up logging with Windows-compatible file handling"""
+    
+    # Create logger
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+    
+    # Clear any existing handlers
+    logger.handlers.clear()
+    
+    # Console handler for immediate feedback
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    console_handler.setFormatter(console_formatter)
+    logger.addHandler(console_handler)
+    
+    # File handler with Windows-safe rotation
+    log_file = os.path.join(logs_dir, 'avatar_commerce.log')
+    
+    try:
+        # Use TimedRotatingFileHandler instead of RotatingFileHandler for better Windows compatibility
+        file_handler = logging.handlers.TimedRotatingFileHandler(
+            log_file,
+            when='midnight',  # Rotate at midnight
+            interval=1,       # Every 1 day
+            backupCount=7,    # Keep 7 days of logs
+            encoding='utf-8'
+        )
+        
+        # Alternative: Use a simple FileHandler if rotation causes issues
+        # file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        
+        file_handler.setLevel(logging.INFO)
+        file_formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s [in %(pathname)s:%(lineno)d]'
+        )
+        file_handler.setFormatter(file_formatter)
+        logger.addHandler(file_handler)
+        
+    except Exception as e:
+        # If file logging fails, continue with console logging only
+        print(f"Warning: Could not set up file logging: {e}")
+        print("Continuing with console logging only...")
+    
+    return logger
+
+# Set up logging
+logger = setup_logging()
+
+# Alternative simple logging setup if the above still causes issues
+def setup_simple_logging():
+    """Fallback simple logging setup"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),  # Console output
+            logging.FileHandler(
+                os.path.join(logs_dir, f'avatar_commerce_{datetime.now().strftime("%Y%m%d")}.log'),
+                encoding='utf-8'
+            )
+        ]
+    )
+    return logging.getLogger(__name__)
+
+# If you continue to have issues, uncomment this line and comment out the setup_logging() call above:
+# logger = setup_simple_logging()
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = JWT_SECRET_KEY
@@ -489,6 +562,8 @@ def upload_to_storage_admin(file_content, file_path, mimetype, bucket_name="infl
             "error": str(e)
         }
 
+# Replace the file validation section in your create_avatar function with this:
+
 @app.route('/api/avatar/create', methods=['POST'])
 @influencer_token_required
 def create_avatar(current_user):
@@ -498,15 +573,8 @@ def create_avatar(current_user):
         logger.info(f"Request method: {request.method}")
         logger.info(f"Request content type: {request.content_type}")
         logger.info(f"Request files: {list(request.files.keys())}")
-        logger.info(f"Request form data: {list(request.form.keys())}")
-        logger.info(f"Request args: {dict(request.args)}")
         
-        # Print raw request info
-        print(f"🔍 Avatar create - Files in request: {list(request.files.keys())}")
-        print(f"🔍 Avatar create - Form data: {list(request.form.keys())}")
-        print(f"🔍 Avatar create - Content-Type: {request.content_type}")
-        
-        # 1. Validate request - Check for any file field name variations
+        # 1. Validate request - Check for file
         file = None
         file_field_name = None
         
@@ -532,85 +600,150 @@ def create_avatar(current_user):
                     "content_type": request.content_type
                 }
             }), 400
-            
-        influencer_id = current_user["id"]
-        logger.info(f"Processing file '{file.filename}' from field '{file_field_name}' for user {influencer_id}")
         
         if file.filename == '':
             return jsonify({
                 "message": "Empty filename",
                 "status": "error"
             }), 400
-
-        # 2. Validate file type
-        allowed_extensions = {'png', 'jpg', 'jpeg', 'webp'}
+        
+        # 2. Improved file validation using extension (more reliable than MIME type)
+        logger.info(f"Validating file: {file.filename}, MIME type: {file.mimetype}")
+        
+        # Get file extension
         file_extension = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
+        allowed_extensions = {'png', 'jpg', 'jpeg', 'webp'}
         
         if file_extension not in allowed_extensions:
             return jsonify({
-                "message": f"Invalid file type '{file_extension}'. Allowed: {', '.join(allowed_extensions)}",
-                "status": "error"
+                "message": f"Invalid file extension '.{file_extension}'. Allowed: {', '.join(['.' + ext for ext in allowed_extensions])}",
+                "status": "error",
+                "debug": {
+                    "filename": file.filename,
+                    "detected_extension": file_extension,
+                    "allowed_extensions": list(allowed_extensions),
+                    "mime_type": file.mimetype
+                }
             }), 400
-
+        
         # 3. Check file size
-        file.seek(0, os.SEEK_END)
+        file.seek(0, 2)  # Seek to end
         file_size = file.tell()
-        file.seek(0)
+        file.seek(0)     # Reset to beginning
         
         MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+        MIN_FILE_SIZE = 1024  # 1KB
         
         if file_size > MAX_FILE_SIZE:
             return jsonify({
-                "message": f"File too large. Maximum size is {MAX_FILE_SIZE/1024/1024}MB, received {file_size/1024/1024:.2f}MB",
-                "status": "error"
+                "message": f"File too large: {file_size/1024/1024:.2f}MB. Maximum allowed: {MAX_FILE_SIZE/1024/1024}MB",
+                "status": "error",
+                "debug": {
+                    "file_size_bytes": file_size,
+                    "file_size_mb": round(file_size/1024/1024, 2),
+                    "max_size_mb": MAX_FILE_SIZE/1024/1024
+                }
             }), 413
-
-        logger.info(f"File validation passed: {file.filename}, {file_size} bytes, type: {file.mimetype}")
-
-        # 4. Upload to Supabase storage first (for backup/profile)
-        from werkzeug.utils import secure_filename
-        safe_filename = secure_filename(file.filename)
-        file_path = f"avatars/original_{influencer_id}_{int(datetime.now().timestamp())}_{safe_filename}"
-        bucket_name = "influencer-assets"
-        file_content = file.read()
-        file.seek(0)  # Reset for later use
-
-        logger.info(f"Attempting Supabase upload to: {file_path}")
-
-        # Use admin client for upload
+        
+        if file_size < MIN_FILE_SIZE:
+            return jsonify({
+                "message": f"File too small: {file_size} bytes. Minimum: {MIN_FILE_SIZE} bytes",
+                "status": "error"
+            }), 400
+        
+        logger.info(f"File validation passed: {file.filename}, {file_size} bytes, extension: .{file_extension}")
+        
+        # 4. Read file content
         try:
-            # Check if bucket exists
+            file_content = file.read()
+            file.seek(0)  # Reset for potential reuse
+            
+            if not file_content:
+                return jsonify({
+                    "message": "Empty file content",
+                    "status": "error"
+                }), 400
+                
+        except Exception as read_error:
+            logger.error(f"File read error: {str(read_error)}")
+            return jsonify({
+                "message": f"Failed to read uploaded file: {str(read_error)}",
+                "status": "error"
+            }), 400
+        
+        # 5. Generate clean filename with proper extension mapping
+        username = current_user['username']
+        timestamp = int(datetime.now().timestamp())
+        
+        # Map extensions to ensure consistency
+        extension_mapping = {
+            'jpg': 'jpg',
+            'jpeg': 'jpg',
+            'png': 'png',
+            'webp': 'webp'
+        }
+        
+        clean_extension = extension_mapping.get(file_extension, 'jpg')
+        clean_filename = f"{username}_avatar_{timestamp}.{clean_extension}"
+        
+        # Determine MIME type based on extension (more reliable than file.mimetype)
+        mime_type_mapping = {
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'png': 'image/png',
+            'webp': 'image/webp'
+        }
+        
+        mimetype = mime_type_mapping.get(file_extension, 'image/jpeg')
+        
+        logger.info(f"Processing file: {clean_filename}, size: {len(file_content)} bytes, type: {mimetype}")
+        
+        # 6. Upload to Supabase storage
+        bucket_name = "influencer-assets"
+        file_path = f"avatars/{username}/{clean_filename}"
+        
+        try:
+            # Ensure bucket exists
             try:
                 buckets = admin_supabase.storage.list_buckets()
                 bucket_exists = any(b.get('name') == bucket_name for b in buckets)
-                logger.info(f"Bucket '{bucket_name}' exists: {bucket_exists}")
                 
                 if not bucket_exists:
-                    logger.info(f"Creating bucket: {bucket_name}")
-                    admin_supabase.storage.create_bucket(bucket_name, {"public": True})
-                    
+                    admin_supabase.storage.create_bucket(bucket_name, {
+                        "public": True,
+                        "allowed_mime_types": ["image/jpeg", "image/png", "image/webp"]
+                    })
+                    logger.info(f"Created bucket: {bucket_name}")
             except Exception as bucket_error:
-                logger.warning(f"Bucket check/creation failed: {bucket_error}")
-
-            # Upload file
+                logger.warning(f"Bucket creation/check failed: {bucket_error}")
+            
+            # Upload file using admin client
             upload_response = admin_supabase.storage.from_(bucket_name).upload(
                 path=file_path,
                 file=file_content,
                 file_options={
-                    "content-type": file.mimetype,
+                    "content-type": mimetype,
                     "upsert": True  # Allow overwrite
                 }
             )
             
+            # Generate public URL
             public_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_name}/{file_path}"
-            logger.info(f"Supabase upload successful: {public_url}")
+            logger.info(f"File uploaded to: {public_url}")
             
-        except Exception as upload_error:
-            logger.error(f"Supabase upload error: {str(upload_error)}")
-            # Continue even if Supabase fails
-            public_url = None
-
-        # 5. Create custom avatar using HeyGen
+        except Exception as storage_error:
+            logger.error(f"Storage upload failed: {str(storage_error)}")
+            return jsonify({
+                "message": f"Failed to store file: {str(storage_error)}",
+                "status": "error",
+                "debug": {
+                    "storage_error": str(storage_error),
+                    "file_path": file_path,
+                    "bucket_name": bucket_name
+                }
+            }), 500
+        
+        # 7. Create HeyGen avatar using the improved function
         if not HEYGEN_API_KEY:
             return jsonify({
                 "message": "HeyGen API key not configured",
@@ -621,146 +754,60 @@ def create_avatar(current_user):
         try:
             logger.info("Starting HeyGen avatar creation...")
             
-            # Upload to HeyGen using files parameter (not data)
-            files = {
-                'file': (file.filename, file_content, file.mimetype)
-            }
+            # Use the improved HeyGen creation function
+            heygen_result = create_heygen_custom_avatar(file_content, clean_filename, username)
             
-            upload_headers = {
-                "X-Api-Key": HEYGEN_API_KEY
-            }
-            
-            logger.info(f"Uploading to HeyGen with headers: {upload_headers}")
-            
-            upload_response = requests.post(
-                "https://upload.heygen.com/v1/asset",
-                headers=upload_headers,
-                files=files,
-                timeout=60
-            )
-            
-            logger.info(f"HeyGen upload response: {upload_response.status_code}")
-            logger.info(f"HeyGen upload body: {upload_response.text}")
-            
-            if upload_response.status_code == 200:
-                upload_data = upload_response.json()
+            if heygen_result.get("success"):
+                avatar_id = heygen_result.get("avatar_id")
                 
-                if upload_data.get("code") != 100:
-                    error_msg = upload_data.get("msg", "Upload failed")
-                    logger.error(f"HeyGen upload error: {error_msg}")
-                    return jsonify({
-                        "message": f"HeyGen upload failed: {error_msg}",
-                        "status": "error",
-                        "data": {"public_url": public_url}
-                    }), 500
-                
-                asset_id = upload_data.get("data", {}).get("id")
-                if not asset_id:
-                    logger.error(f"No asset ID in response: {upload_data}")
-                    return jsonify({
-                        "message": "No asset ID returned from HeyGen",
-                        "status": "error",
-                        "data": {"public_url": public_url}
-                    }), 500
-                
-                logger.info(f"HeyGen asset created with ID: {asset_id}")
-
-                # Create avatar group
-                group_payload = {
-                    "name": f"{current_user['username']}_avatar_{int(datetime.now().timestamp())}",
-                    "image_key": f"image/{asset_id}/original"
+                # Update influencer record with avatar information
+                update_data = {
+                    "heygen_avatar_id": avatar_id,
+                    "original_asset_path": file_path,
+                    "avatar_creation_method": heygen_result.get("method", "unknown"),
+                    "avatar_created_at": datetime.now().isoformat()
                 }
                 
-                group_headers = {
-                    "X-Api-Key": HEYGEN_API_KEY,
-                    "Content-Type": "application/json"
-                }
+                update_response = admin_supabase.table("influencers").update(update_data).eq("id", current_user["id"]).execute()
                 
-                logger.info(f"Creating avatar group with payload: {group_payload}")
-                
-                group_response = requests.post(
-                    "https://api.heygen.com/v2/photo_avatar/avatar_group/create",
-                    headers=group_headers,
-                    json=group_payload,
-                    timeout=60
-                )
-                
-                logger.info(f"HeyGen group response: {group_response.status_code}")
-                logger.info(f"HeyGen group body: {group_response.text}")
-                
-                if group_response.status_code == 200:
-                    group_data = group_response.json()
-                    
-                    if group_data.get("code") == 100:
-                        group_id = group_data.get("data", {}).get("id")
-                        
-                        # Update database
-                        try:
-                            admin_supabase.table('influencers').update({
-                                'avatar_id': group_id,
-                                'avatar_image_url': public_url,
-                                'avatar_status': 'training'
-                            }).eq('id', influencer_id).execute()
-                            logger.info(f"Database updated for user {influencer_id}")
-                        except Exception as db_error:
-                            logger.error(f"Database update failed: {db_error}")
-                        
-                        return jsonify({
-                            "message": "Avatar created successfully! Training will complete shortly.",
-                            "status": "success",
-                            "data": {
-                                "avatar_id": group_id,
-                                "public_url": public_url,
-                                "training_status": "in_progress"
-                            }
-                        })
-                    else:
-                        error_msg = group_data.get("msg", "Group creation failed")
-                        logger.error(f"HeyGen group creation failed: {error_msg}")
-                        return jsonify({
-                            "message": f"Avatar group creation failed: {error_msg}",
-                            "status": "error",
-                            "data": {"public_url": public_url}
-                        }), 500
+                if update_response.data:
+                    logger.info(f"✅ Avatar created successfully: {avatar_id}")
+                    return jsonify({
+                        "message": "Avatar created successfully!",
+                        "status": "success",
+                        "data": {
+                            "avatar_id": avatar_id,
+                            "public_url": public_url,
+                            "method": heygen_result.get("method"),
+                            "filename": clean_filename,
+                            "file_extension": clean_extension,
+                            "mime_type": mimetype
+                        }
+                    }), 200
                 else:
-                    logger.error(f"HeyGen group creation failed with status {group_response.status_code}")
+                    logger.error("Failed to update influencer record")
                     return jsonify({
-                        "message": f"Avatar creation failed with status {group_response.status_code}",
-                        "status": "error",
-                        "data": {"public_url": public_url, "response": group_response.text}
-                    }), 500
-            
-            elif upload_response.status_code == 401:
-                return jsonify({
-                    "message": "Invalid HeyGen API key",
-                    "status": "error",
-                    "data": {"public_url": public_url}
-                }), 500
-            elif upload_response.status_code == 403:
-                return jsonify({
-                    "message": "HeyGen API access forbidden - check your plan permissions",
-                    "status": "error",
-                    "data": {"public_url": public_url}
-                }), 500
+                        "message": "Avatar created but failed to update profile",
+                        "status": "partial_success",
+                        "data": {"avatar_id": avatar_id, "public_url": public_url}
+                    }), 200
+                    
             else:
-                logger.error(f"HeyGen upload failed: {upload_response.status_code} - {upload_response.text}")
+                error_msg = heygen_result.get("error", "Unknown HeyGen error")
+                logger.error(f"HeyGen avatar creation failed: {error_msg}")
                 return jsonify({
-                    "message": f"HeyGen upload failed with status {upload_response.status_code}",
+                    "message": f"Avatar creation failed: {error_msg}",
                     "status": "error",
-                    "data": {"public_url": public_url, "response": upload_response.text}
+                    "data": {
+                        "public_url": public_url,
+                        "heygen_response": heygen_result.get("heygen_response")
+                    }
                 }), 500
                 
-        except requests.exceptions.Timeout:
-            logger.error("HeyGen API request timed out")
+        except Exception as heygen_error:
+            logger.error(f"HeyGen API error: {str(heygen_error)}")
             return jsonify({
-                "message": "HeyGen API request timed out",
-                "status": "error",
-                "data": {"public_url": public_url}
-            }), 500
-        except requests.exceptions.RequestException as e:
-            logger.error(f"HeyGen API request failed: {str(e)}")
-            return jsonify({
-                "message": f"Failed to connect to HeyGen API: {str(e)}",
+                "message": f"HeyGen API error: {str(heygen_error)}",
                 "status": "error",
                 "data": {"public_url": public_url}
             }), 500
@@ -975,7 +1022,10 @@ def check_heygen_quota():
 
 
 def create_heygen_custom_avatar(file_content, filename, username):
-    """Create custom avatar using HeyGen Pro API - try multiple methods"""
+    """
+    Create custom avatar using HeyGen Pro API - improved implementation
+    Handles the 'asset data must be provided' error properly
+    """
     
     if not HEYGEN_API_KEY:
         return {
@@ -986,16 +1036,16 @@ def create_heygen_custom_avatar(file_content, filename, username):
     import time
     avatar_name = f"{username}_avatar_{int(time.time())}"
     
-    # Method 1: Direct photo avatar creation (HeyGen Pro)
-    logger.info("Attempting direct photo avatar creation...")
+    # Method 1: Direct photo avatar creation (most likely to work)
+    logger.info("Attempting Method 1: Direct photo avatar creation")
     try:
         headers = {
             "X-Api-Key": HEYGEN_API_KEY
         }
         
-        # Prepare the file for upload - use 'image' field
+        # CRITICAL FIX: Use the correct file field name and ensure proper multipart format
         files = {
-            'image': (filename, file_content, 'image/jpeg')
+            'image': (filename, file_content, 'image/jpeg')  # HeyGen expects 'image' field
         }
         
         data = {
@@ -1013,8 +1063,8 @@ def create_heygen_custom_avatar(file_content, filename, username):
             timeout=120
         )
         
-        logger.info(f"Direct creation response: {response.status_code}")
-        logger.info(f"Direct creation body: {response.text}")
+        logger.info(f"Method 1 response: {response.status_code}")
+        logger.info(f"Method 1 body: {response.text}")
         
         if response.status_code == 200:
             result = response.json()
@@ -1057,9 +1107,6 @@ def create_heygen_custom_avatar(file_content, filename, username):
                 "heygen_response": response.text
             }
         
-        elif response.status_code == 405:
-            logger.warning("Direct creation method not allowed, trying alternative...")
-        
         else:
             logger.warning(f"Direct creation failed with status {response.status_code}")
         
@@ -1075,9 +1122,9 @@ def create_heygen_custom_avatar(file_content, filename, username):
             "X-Api-Key": HEYGEN_API_KEY
         }
         
-        # Upload asset first
+        # CRITICAL FIX: Ensure proper file format for asset upload
         files = {
-            'file': (filename, file_content, 'image/jpeg')
+            'file': (filename, file_content, 'image/jpeg')  # Asset upload expects 'file' field
         }
         
         logger.info("Uploading asset to HeyGen...")
@@ -1117,7 +1164,7 @@ def create_heygen_custom_avatar(file_content, filename, username):
                     # Try different avatar creation endpoints
                     avatar_endpoints = [
                         "https://api.heygen.com/v2/photo_avatar/create",
-                        "https://api.heygen.com/v2/photo_avatar/avatar_group/create"
+                        "https://api.heygen.com/v1/photo_avatar/create"
                     ]
                     
                     for endpoint in avatar_endpoints:
@@ -3430,6 +3477,35 @@ def test_cors():
             "method": method,
             "origin": origin
         })
+
+def validate_uploaded_file(file):
+    """Improved file validation using extension-based approach"""
+    
+    if not file or file.filename == '':
+        raise ValueError("No file provided or empty filename")
+    
+    # Get file extension
+    file_extension = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
+    allowed_extensions = {'png', 'jpg', 'jpeg', 'webp'}
+    
+    if file_extension not in allowed_extensions:
+        raise ValueError(f"Invalid file extension '.{file_extension}'. Allowed: {', '.join(['.' + ext for ext in allowed_extensions])}")
+    
+    # Check file size
+    file.seek(0, 2)  # Seek to end
+    file_size = file.tell()
+    file.seek(0)     # Reset to beginning
+    
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+    MIN_FILE_SIZE = 1024  # 1KB
+    
+    if file_size > MAX_FILE_SIZE:
+        raise ValueError(f"File too large: {file_size/1024/1024:.2f}MB. Maximum: {MAX_FILE_SIZE/1024/1024}MB")
+    
+    if file_size < MIN_FILE_SIZE:
+        raise ValueError(f"File too small: {file_size} bytes. Minimum: {MIN_FILE_SIZE} bytes")
+    
+    return True
 
 @app.route('/api/avatar/test-upload', methods=['POST'])
 @influencer_token_required
