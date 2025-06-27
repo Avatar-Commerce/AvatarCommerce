@@ -562,7 +562,7 @@ def upload_to_storage_admin(file_content, file_path, mimetype, bucket_name="infl
             "error": str(e)
         }
 
-def create_heygen_photo_avatar_v2_fixed(file_content, filename, username):
+def create_heygen_photo_avatar_v2_fixed(file_content, filename, username, file_mimetype=None):
     """
     FIXED HeyGen Photo Avatar creation using correct asset upload format
     """
@@ -590,10 +590,29 @@ def create_heygen_photo_avatar_v2_fixed(file_content, filename, username):
         # Step 1: Upload Asset using CORRECT format (raw binary data)
         logger.info("🔄 Step 1: Uploading asset to HeyGen (FIXED FORMAT)")
         
+        # CRITICAL FIX: Determine correct content type based on file extension and mimetype
+        file_extension = filename.rsplit('.', 1)[1].lower() if '.' in filename else 'jpg'
+        
+        # Map file extensions to MIME types
+        content_type_mapping = {
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'png': 'image/png',
+            'webp': 'image/webp'
+        }
+        
+        # Prefer file_mimetype if provided and valid, otherwise use file extension
+        if file_mimetype and file_mimetype.startswith('image/'):
+            content_type = file_mimetype
+            logger.info(f"Using provided mimetype: {content_type}")
+        else:
+            content_type = content_type_mapping.get(file_extension, 'image/jpeg')
+            logger.info(f"Using extension-based content type: {content_type} (from .{file_extension})")
+        
         # CRITICAL FIX: Send raw binary data, not multipart form data
         headers = {
             "X-Api-Key": HEYGEN_API_KEY,
-            "Content-Type": "image/jpeg"  # Set content type directly
+            "Content-Type": content_type  # Dynamic content type based on file
         }
         
         # Send file content as raw binary data in the request body
@@ -787,9 +806,9 @@ def create_heygen_photo_avatar_v2_fixed(file_content, filename, username):
         }
 
 
-@app.route('/api/avatar/create-v2-fixed', methods=['POST'])
+@app.route('/api/avatar/create', methods=['POST'])
 @influencer_token_required
-def create_avatar_v2_fixed(current_user):
+def create_avatar(current_user):
     """
     FIXED avatar creation endpoint using correct HeyGen V2 API format
     """
@@ -846,7 +865,7 @@ def create_avatar_v2_fixed(current_user):
         logger.info(f"Processing file: {clean_filename} ({len(file_content)} bytes)")
 
         # 5. Create HeyGen Photo Avatar using V2 FIXED API
-        heygen_result = create_heygen_photo_avatar_v2_fixed(file_content, clean_filename, username)
+        heygen_result = create_heygen_photo_avatar_v2_fixed(file_content, clean_filename, username, file.mimetype)
         
         if heygen_result["success"]:
             avatar_id = heygen_result["avatar_id"]
@@ -915,153 +934,6 @@ def create_avatar_v2_fixed(current_user):
             "message": f"Internal server error: {str(e)}",
             "status": "error"
         }), 500
-
-@app.route('/api/avatar/create', methods=['POST'])
-@influencer_token_required
-def create_avatar(current_user):
-    try:
-        # Debug logging
-        logger.info(f"Avatar creation request from user: {current_user.get('username', 'unknown')}")
-        logger.info(f"Request method: {request.method}")
-        logger.info(f"Request content type: {request.content_type}")
-        logger.info(f"Request files: {list(request.files.keys())}")
-        
-        # 1. Validate request - Check for file
-        file = None
-        file_field_name = None
-        
-        # Check common field names
-        possible_field_names = ['file', 'avatar_image', 'image', 'upload', 'photo']
-        
-        for field_name in possible_field_names:
-            if field_name in request.files:
-                file = request.files[field_name]
-                file_field_name = field_name
-                logger.info(f"Found file in field: {field_name}")
-                break
-        
-        if not file:
-            error_msg = f"No file uploaded. Expected fields: {possible_field_names}. Found fields: {list(request.files.keys())}"
-            logger.error(error_msg)
-            return jsonify({
-                "message": error_msg,
-                "status": "error"
-            }), 400
-        
-        if file.filename == '':
-            return jsonify({
-                "message": "Empty filename",
-                "status": "error"
-            }), 400
-
-        # 2. Read file content IMMEDIATELY and validate
-        try:
-            file.seek(0)  # Ensure we're at the beginning
-            file_content = file.read()
-            file.seek(0)  # Reset for any future reads
-            
-            logger.info(f"File read successfully: {len(file_content)} bytes")
-            
-            # CRITICAL: Validate file content is not empty
-            if not file_content or len(file_content) == 0:
-                logger.error("File content is empty after reading")
-                return jsonify({
-                    "message": "File content is empty. Please try uploading the file again.",
-                    "status": "error"
-                }), 400
-                
-        except Exception as read_error:
-            logger.error(f"Failed to read file content: {str(read_error)}")
-            return jsonify({
-                "message": f"Failed to read file: {str(read_error)}",
-                "status": "error"
-            }), 400
-
-        # 3. File validation
-        try:
-            validate_uploaded_file(file)
-        except ValueError as ve:
-            logger.error(f"File validation failed: {str(ve)}")
-            return jsonify({
-                "message": str(ve),
-                "status": "error"
-            }), 400
-
-        # 4. Generate clean filename
-        username = current_user.get('username', 'user')
-        file_extension = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else 'jpg'
-        clean_filename = f"{username}_avatar.{file_extension}"
-        
-        logger.info(f"Processing file: {clean_filename} ({len(file_content)} bytes)")
-
-        # 5. Create HeyGen avatar with improved error handling
-        heygen_result = create_heygen_custom_avatar_fixed(file_content, clean_filename, username)
-        
-        if heygen_result["success"]:
-            avatar_id = heygen_result["avatar_id"]
-            logger.info(f"✅ HeyGen avatar created successfully: {avatar_id}")
-            
-            # 6. Upload to Supabase storage
-            try:
-                storage_result = upload_to_supabase_admin_storage(
-                    file_content, 
-                    clean_filename, 
-                    file.mimetype or 'image/jpeg'
-                )
-                
-                if storage_result["success"]:
-                    public_url = storage_result["public_url"]
-                    logger.info(f"✅ File uploaded to storage: {public_url}")
-                else:
-                    logger.warning(f"Storage upload failed: {storage_result.get('error', 'Unknown error')}")
-                    public_url = None
-                    
-            except Exception as storage_error:
-                logger.warning(f"Storage upload error: {str(storage_error)}")
-                public_url = None
-
-            # 7. Update user record in database
-            try:
-                with get_db_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "UPDATE influencers SET has_avatar = %s, avatar_id = %s, profile_image_url = %s WHERE id = %s",
-                        (True, avatar_id, public_url, current_user['id'])
-                    )
-                    conn.commit()
-                    logger.info(f"✅ Database updated for user {current_user['id']}")
-                    
-            except Exception as db_error:
-                logger.error(f"Database update failed: {str(db_error)}")
-                # Don't fail the request if DB update fails, avatar is still created
-            
-            return jsonify({
-                "status": "success",
-                "message": "Avatar created successfully!",
-                "data": {
-                    "avatar_id": avatar_id,
-                    "public_url": public_url,
-                    "method": heygen_result.get("method", "unknown")
-                }
-            })
-        
-        else:
-            error_msg = heygen_result.get("error", "Avatar creation failed")
-            logger.error(f"HeyGen avatar creation failed: {error_msg}")
-            
-            return jsonify({
-                "message": f"Avatar creation failed: {error_msg}",
-                "status": "error",
-                "details": heygen_result
-            }), 500
-    
-    except Exception as e:
-        logger.error(f"Unexpected error in create_avatar: {str(e)}")
-        return jsonify({
-            "message": f"Internal server error: {str(e)}",
-            "status": "error"
-        }), 500
-
 
 def create_heygen_custom_avatar_fixed(file_content, filename, username):
     """
