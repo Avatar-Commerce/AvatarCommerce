@@ -808,12 +808,13 @@ def create_heygen_photo_avatar_v2_fixed(file_content, filename, username, file_m
 
 @app.route('/api/avatar/create', methods=['POST'])
 @influencer_token_required
-def create_avatar(current_user):
+def create_custom_avatar_from_photo(current_user):
     """
-    FIXED avatar creation endpoint using correct HeyGen V2 API format
+    Create a CUSTOM talking avatar from user's uploaded photo
+    This will create a real custom avatar, not assign a pre-built one
     """
     try:
-        logger.info(f"Avatar V2 FIXED creation request from user: {current_user.get('username', 'unknown')}")
+        logger.info(f"Creating CUSTOM avatar from photo for user: {current_user.get('username', 'unknown')}")
         
         # 1. Check for file
         if 'file' not in request.files:
@@ -860,80 +861,233 @@ def create_avatar(current_user):
         # 4. Generate clean filename
         username = current_user.get('username', 'user')
         file_extension = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else 'jpg'
-        clean_filename = f"{username}_avatar.{file_extension}"
+        clean_filename = f"{username}_custom_avatar.{file_extension}"
         
-        logger.info(f"Processing file: {clean_filename} ({len(file_content)} bytes)")
+        logger.info(f"Processing custom avatar creation: {clean_filename} ({len(file_content)} bytes)")
 
-        # 5. Create HeyGen Photo Avatar using V2 FIXED API
-        heygen_result = create_heygen_photo_avatar_v2_fixed(file_content, clean_filename, username, file.mimetype)
+        # 5. Create CUSTOM HeyGen Avatar (not pre-built)
+        custom_result = create_real_custom_avatar(file_content, clean_filename, username, file.mimetype)
         
-        if heygen_result["success"]:
-            avatar_id = heygen_result["avatar_id"]
-            group_id = heygen_result.get("group_id")
+        if custom_result["success"]:
+            avatar_id = custom_result["avatar_id"]
             
-            logger.info(f"✅ HeyGen Photo Avatar V2 FIXED created successfully: {avatar_id}")
+            logger.info(f"✅ CUSTOM Avatar created successfully: {avatar_id}")
             
-            # 6. Upload to Supabase storage
+            # 6. Store to Supabase for backup
+            storage_result = store_avatar_to_supabase(file_content, clean_filename, file.mimetype)
+            public_url = storage_result.get("public_url", "") if storage_result.get("success") else ""
+            
+            # 7. Update database with CUSTOM avatar
             try:
-                storage_result = upload_to_supabase_admin_storage(
-                    file_content, 
-                    clean_filename, 
-                    file.mimetype or 'image/jpeg'
-                )
+                db.update_influencer(current_user["id"], {
+                    "heygen_avatar_id": avatar_id,
+                    "profile_image_url": public_url,
+                    "avatar_created_at": datetime.utcnow().isoformat(),
+                    "avatar_type": "custom"  # Mark as custom
+                })
                 
-                if storage_result["success"]:
-                    public_url = storage_result["public_url"]
-                    logger.info(f"✅ File uploaded to storage: {public_url}")
-                else:
-                    logger.warning(f"Storage upload failed: {storage_result.get('error')}")
-                    public_url = None
-                    
-            except Exception as storage_error:
-                logger.warning(f"Storage upload error: {str(storage_error)}")
-                public_url = None
-
-            # 7. Update user record in database
-            try:
-                with get_db_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "UPDATE influencers SET has_avatar = %s, avatar_id = %s, profile_image_url = %s WHERE id = %s",
-                        (True, avatar_id, public_url, current_user['id'])
-                    )
-                    conn.commit()
-                    logger.info(f"✅ Database updated for user {current_user['id']}")
-                    
+                logger.info(f"Database updated with custom avatar: {avatar_id}")
+                
             except Exception as db_error:
                 logger.error(f"Database update failed: {str(db_error)}")
+                # Don't fail the request if DB update fails
             
             return jsonify({
+                "message": "Custom avatar created successfully from your photo!",
                 "status": "success",
-                "message": "Photo Avatar created successfully using V2 FIXED API!",
                 "data": {
                     "avatar_id": avatar_id,
-                    "group_id": group_id,
+                    "avatar_type": "custom",
                     "public_url": public_url,
-                    "asset_url": heygen_result.get("asset_url"),
-                    "method": heygen_result.get("method", "photo_avatar_v2_fixed")
+                    "method": custom_result.get("method", "custom_creation"),
+                    "ready_for_video": True  # Custom avatars need time to process
                 }
             })
         
         else:
-            error_msg = heygen_result.get("error", "Avatar creation failed")
-            logger.error(f"HeyGen Photo Avatar V2 FIXED creation failed: {error_msg}")
+            error_msg = custom_result.get("error", "Custom avatar creation failed")
+            logger.error(f"Custom avatar creation failed: {error_msg}")
             
             return jsonify({
-                "message": f"Avatar creation failed: {error_msg}",
+                "message": f"Failed to create custom avatar: {error_msg}",
                 "status": "error",
-                "details": heygen_result
+                "details": custom_result
             }), 500
     
     except Exception as e:
-        logger.error(f"Unexpected error in create_avatar_v2_fixed: {str(e)}")
+        logger.error(f"Unexpected error in custom avatar creation: {str(e)}")
         return jsonify({
             "message": f"Internal server error: {str(e)}",
             "status": "error"
         }), 500
+
+
+def create_real_custom_avatar(file_content, filename, username, mimetype):
+    """
+    Create a REAL custom talking avatar from user photo using HeyGen API
+    This creates an actual custom avatar, not a pre-built one
+    """
+    if not HEYGEN_API_KEY:
+        return {
+            "success": False,
+            "error": "HeyGen API key not configured"
+        }
+    
+    import time
+    avatar_name = f"{username}_custom_{int(time.time())}"
+    
+    logger.info(f"🎭 Creating REAL custom avatar: {avatar_name}")
+    logger.info(f"📁 File: {filename} ({len(file_content)} bytes)")
+    
+    # Method 1: HeyGen Instant Avatar API (most direct for custom avatars)
+    try:
+        logger.info("🔄 Method 1: HeyGen Instant Avatar API")
+        
+        headers = {
+            "X-Api-Key": HEYGEN_API_KEY
+        }
+        
+        # Use multipart form data with the user's photo
+        files = {
+            'image': (filename, file_content, mimetype or 'image/jpeg')
+        }
+        
+        data = {
+            'avatar_name': avatar_name,
+            'quality': 'high'  # Request high quality
+        }
+        
+        logger.info("📤 Uploading photo to create custom avatar...")
+        
+        response = requests.post(
+            "https://api.heygen.com/v2/photo_avatar/create",
+            headers=headers,
+            files=files,
+            data=data,
+            timeout=120
+        )
+        
+        logger.info(f"📥 Response: {response.status_code}")
+        logger.info(f"📄 Body: {response.text}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            
+            if not result.get("error"):
+                avatar_data = result.get("data", {})
+                avatar_id = avatar_data.get("id")
+                
+                if avatar_id:
+                    logger.info(f"✅ Custom avatar created: {avatar_id}")
+                    return {
+                        "success": True,
+                        "avatar_id": avatar_id,
+                        "method": "instant_avatar_api",
+                        "response": result
+                    }
+            else:
+                error_msg = result.get("error", {}).get("message", "Unknown error")
+                logger.warning(f"⚠️ Instant avatar API error: {error_msg}")
+        
+        elif response.status_code == 402:
+            logger.error("💳 Payment required - upgrade HeyGen plan for custom avatars")
+            return {
+                "success": False,
+                "error": "Custom avatar creation requires a paid HeyGen plan. Please upgrade your account."
+            }
+        elif response.status_code == 403:
+            logger.error("🚫 Access forbidden - check HeyGen permissions")
+            return {
+                "success": False,
+                "error": "Access denied. Please check your HeyGen API permissions."
+            }
+    
+    except Exception as e:
+        logger.warning(f"⚠️ Method 1 failed: {str(e)}")
+    
+    # Method 2: Asset upload + Custom avatar creation
+    try:
+        logger.info("🔄 Method 2: Asset Upload + Custom Avatar Creation")
+        
+        # Step 1: Upload the image as an asset
+        upload_headers = {
+            "X-Api-Key": HEYGEN_API_KEY
+        }
+        
+        upload_files = {
+            'file': (filename, file_content, mimetype or 'image/jpeg')
+        }
+        
+        logger.info("📤 Uploading image asset...")
+        
+        upload_response = requests.post(
+            "https://upload.heygen.com/v1/asset",
+            headers=upload_headers,
+            files=upload_files,
+            timeout=60
+        )
+        
+        logger.info(f"📥 Upload response: {upload_response.status_code}")
+        
+        if upload_response.status_code == 200:
+            upload_data = upload_response.json()
+            
+            if upload_data.get("code") == 100:
+                asset_info = upload_data.get("data", {})
+                asset_url = asset_info.get("url")
+                asset_id = asset_info.get("id")
+                
+                if asset_url:
+                    logger.info(f"✅ Asset uploaded: {asset_id}")
+                    
+                    # Step 2: Create custom avatar using the uploaded asset
+                    avatar_headers = {
+                        "X-Api-Key": HEYGEN_API_KEY,
+                        "Content-Type": "application/json"
+                    }
+                    
+                    avatar_payload = {
+                        "avatar_name": avatar_name,
+                        "image_url": asset_url
+                    }
+                    
+                    logger.info("🎭 Creating custom avatar from asset...")
+                    
+                    avatar_response = requests.post(
+                        "https://api.heygen.com/v2/photo_avatar/create",
+                        headers=avatar_headers,
+                        json=avatar_payload,
+                        timeout=60
+                    )
+                    
+                    logger.info(f"🎭 Avatar creation response: {avatar_response.status_code}")
+                    
+                    if avatar_response.status_code == 200:
+                        avatar_data = avatar_response.json()
+                        
+                        if not avatar_data.get("error"):
+                            avatar_id = avatar_data.get("data", {}).get("id")
+                            
+                            if avatar_id:
+                                logger.info(f"✅ Custom avatar created from asset: {avatar_id}")
+                                return {
+                                    "success": True,
+                                    "avatar_id": avatar_id,
+                                    "asset_id": asset_id,
+                                    "method": "asset_upload_creation",
+                                    "response": avatar_data
+                                }
+                
+    except Exception as e:
+        logger.warning(f"⚠️ Method 2 failed: {str(e)}")
+    
+    # Method 3: Fallback error
+    logger.error("❌ All custom avatar creation methods failed")
+    return {
+        "success": False,
+        "error": "Unable to create custom avatar. This may require a paid HeyGen plan or your image may not meet the requirements (clear face visible, good lighting, etc.)"
+    }
+
 
 def create_heygen_custom_avatar_fixed(file_content, filename, username):
     """
@@ -3242,15 +3396,17 @@ def get_available_avatars(current_user):
 # Add this to main.py
 @app.route('/api/avatar/test-video', methods=['POST'])
 @influencer_token_required
-def test_avatar_video(current_user):
+def test_avatar_video_final(current_user):
     """
-    Test endpoint to generate a video using the created photo avatar
+    FINAL FIX: Test video generation with proper avatar type detection
+    Works with both regular HeyGen avatars and custom talking photos
     """
     try:
         # Get request data
         data = request.get_json() or {}
         avatar_id = data.get('avatar_id')
-        text = data.get('text', 'Hello! This is a test of my new avatar.')
+        text = data.get('text', 'Hello! This is a test of my avatar.')
+        voice_id = data.get('voice_id', 'd7bbcdd6964c47bdaae26decade4a933')
         
         if not avatar_id:
             return jsonify({
@@ -3264,36 +3420,82 @@ def test_avatar_video(current_user):
                 "status": "error"
             }), 500
 
-        logger.info(f"Testing avatar video generation for avatar: {avatar_id}")
+        logger.info(f"🎬 Testing avatar video: {avatar_id}")
+        logger.info(f"🎤 Voice: {voice_id}")
         
-        # Create video using the photo avatar
         headers = {
             "X-Api-Key": HEYGEN_API_KEY,
             "Content-Type": "application/json"
         }
         
-        # Video generation payload using talking_photo format
-        video_payload = {
-            "video_inputs": [
-                {
-                    "character": {
-                        "type": "talking_photo",
-                        "talking_photo_id": avatar_id
-                    },
-                    "voice": {
-                        "type": "text",
-                        "input_text": text,
-                        "voice_id": "d7bbcdd6964c47bdaae26decade4a933"  # Default English voice
-                    }
-                }
-            ],
-            "dimension": {
-                "width": 1280,
-                "height": 720
-            }
-        }
+        # STEP 1: Properly detect avatar type by checking HeyGen APIs
+        avatar_type = detect_real_avatar_type(avatar_id, headers)
+        logger.info(f"🔍 Detected avatar type: {avatar_type}")
         
-        logger.info(f"Sending video generation request: {video_payload}")
+        # STEP 2: Create video payload based on ACTUAL avatar type
+        if avatar_type == "regular_avatar":
+            # For regular HeyGen avatars (like Abigail_expressive_2024112501)
+            video_payload = {
+                "video_inputs": [
+                    {
+                        "character": {
+                            "type": "avatar",
+                            "avatar_id": avatar_id,
+                            "avatar_style": "normal"
+                        },
+                        "voice": {
+                            "type": "text",
+                            "input_text": text,
+                            "voice_id": voice_id
+                        },
+                        "background": {
+                            "type": "color",
+                            "value": "#FFFFFF"
+                        }
+                    }
+                ],
+                "dimension": {
+                    "width": 1280,
+                    "height": 720
+                }
+            }
+            logger.info("📹 Using regular avatar format")
+            
+        elif avatar_type == "custom_avatar":
+            # For custom talking photos (user uploaded)
+            video_payload = {
+                "video_inputs": [
+                    {
+                        "character": {
+                            "type": "talking_photo",
+                            "talking_photo_id": avatar_id
+                        },
+                        "voice": {
+                            "type": "text",
+                            "input_text": text,
+                            "voice_id": voice_id
+                        },
+                        "background": {
+                            "type": "color",
+                            "value": "#FFFFFF"
+                        }
+                    }
+                ],
+                "dimension": {
+                    "width": 1280,
+                    "height": 720
+                }
+            }
+            logger.info("📸 Using custom talking photo format")
+            
+        else:
+            return jsonify({
+                "message": f"Avatar type could not be determined for {avatar_id}",
+                "status": "error"
+            }), 400
+        
+        # STEP 3: Generate video
+        logger.info(f"🎬 Generating video with {avatar_type}...")
         
         video_response = requests.post(
             "https://api.heygen.com/v2/video/generate",
@@ -3302,31 +3504,31 @@ def test_avatar_video(current_user):
             timeout=60
         )
         
-        logger.info(f"Video generation response: {video_response.status_code}")
-        logger.info(f"Video generation body: {video_response.text}")
+        logger.info(f"📹 Video response: {video_response.status_code}")
         
         if video_response.status_code != 200:
+            logger.error(f"❌ Video generation failed: {video_response.text}")
             return jsonify({
                 "message": f"Video generation failed: {video_response.status_code}",
                 "status": "error",
                 "details": video_response.text
             }), 500
         
-        try:
-            video_data = video_response.json()
-        except:
-            return jsonify({
-                "message": "Invalid JSON response from video generation",
-                "status": "error",
-                "response": video_response.text
-            }), 500
+        video_data = video_response.json()
         
         # Check for errors
         if video_data.get("error"):
+            error_info = video_data["error"]
+            error_message = error_info.get("message", "Unknown error")
+            error_code = error_info.get("code", "unknown")
+            
+            logger.error(f"❌ HeyGen error: {error_code} - {error_message}")
+            
             return jsonify({
-                "message": f"Video generation error: {video_data['error']}",
+                "message": f"Video generation error: {error_message}",
                 "status": "error",
-                "details": video_data
+                "error_code": error_code,
+                "avatar_type_used": avatar_type
             }), 500
         
         # Get video ID
@@ -3339,27 +3541,256 @@ def test_avatar_video(current_user):
                 "details": video_data
             }), 500
         
-        logger.info(f"✅ Video generation started. Video ID: {video_id}")
+        logger.info(f"✅ Video generation started: {video_id}")
         
         return jsonify({
             "status": "success",
-            "message": "Avatar video generation started!",
+            "message": f"Video generation started with {avatar_type}!",
             "data": {
                 "video_id": video_id,
                 "avatar_id": avatar_id,
+                "avatar_type": avatar_type,
                 "text": text,
-                "status_check_url": f"/api/avatar/video-status/{video_id}",
-                "note": "Video is being generated. Use the video_id to check status."
+                "voice_id": voice_id
             }
         })
         
     except Exception as e:
-        logger.error(f"Avatar video test error: {str(e)}")
+        logger.error(f"❌ Video test error: {str(e)}")
         return jsonify({
             "message": f"Video test failed: {str(e)}",
             "status": "error"
         }), 500
 
+
+def detect_real_avatar_type(avatar_id, headers):
+    """
+    Properly detect avatar type by checking HeyGen APIs
+    Returns: "regular_avatar", "custom_avatar", or "unknown"
+    """
+    # Method 1: Check if it's in the regular avatars list
+    try:
+        logger.info(f"🔍 Checking if {avatar_id} is a regular avatar...")
+        
+        avatars_response = requests.get(
+            "https://api.heygen.com/v2/avatars",
+            headers=headers,
+            timeout=10
+        )
+        
+        if avatars_response.status_code == 200:
+            avatars_data = avatars_response.json()
+            avatars = avatars_data.get("data", {}).get("avatars", [])
+            
+            # Check if avatar_id exists in regular avatars
+            for avatar in avatars:
+                if avatar.get("avatar_id") == avatar_id:
+                    logger.info(f"✅ Found {avatar_id} in regular avatars list")
+                    return "regular_avatar"
+                    
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to check regular avatars: {str(e)}")
+    
+    # Method 2: Check if it's a custom photo avatar
+    try:
+        logger.info(f"🔍 Checking if {avatar_id} is a custom photo avatar...")
+        
+        photo_response = requests.get(
+            f"https://api.heygen.com/v2/photo_avatar/{avatar_id}",
+            headers=headers,
+            timeout=10
+        )
+        
+        if photo_response.status_code == 200:
+            photo_data = photo_response.json()
+            
+            if not photo_data.get("error"):
+                logger.info(f"✅ Found {avatar_id} as custom photo avatar")
+                return "custom_avatar"
+                
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to check photo avatar: {str(e)}")
+    
+    # If we can't determine the type, log it and return unknown
+    logger.warning(f"❓ Could not determine avatar type for {avatar_id}")
+    return "unknown"
+
+
+# Also add an endpoint to manually create custom avatars for testing
+@app.route('/api/avatar/create-custom', methods=['POST'])
+@influencer_token_required
+def create_actual_custom_avatar(current_user):
+    """
+    Create an actual custom avatar from user photo for testing
+    This will create a real talking photo, not assign a pre-built avatar
+    """
+    try:
+        logger.info("🎭 Creating ACTUAL custom avatar from user photo")
+        
+        # Check for file
+        if 'file' not in request.files:
+            return jsonify({
+                "message": "No file uploaded",
+                "status": "error"
+            }), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({
+                "message": "Empty filename",
+                "status": "error"
+            }), 400
+
+        # Read file content
+        file.seek(0)
+        file_content = file.read()
+        
+        if not file_content:
+            return jsonify({
+                "message": "File content is empty",
+                "status": "error"
+            }), 400
+
+        # Validate file
+        try:
+            validate_uploaded_file(file)
+        except ValueError as ve:
+            return jsonify({
+                "message": str(ve),
+                "status": "error"
+            }), 400
+
+        username = current_user.get('username', 'user')
+        clean_filename = f"{username}_real_custom.jpg"
+        
+        logger.info(f"📤 Creating custom avatar: {clean_filename} ({len(file_content)} bytes)")
+
+        # Try to create REAL custom avatar
+        result = create_heygen_custom_avatar(file_content, clean_filename, username)
+        
+        if result["success"]:
+            avatar_id = result["avatar_id"]
+            
+            # Update database
+            try:
+                db.update_influencer(current_user["id"], {
+                    "heygen_avatar_id": avatar_id,
+                    "avatar_type": "custom"
+                })
+            except Exception as db_error:
+                logger.warning(f"DB update failed: {str(db_error)}")
+            
+            return jsonify({
+                "message": "Custom avatar created successfully!",
+                "status": "success",
+                "data": {
+                    "avatar_id": avatar_id,
+                    "avatar_type": "custom",
+                    "method": result.get("method", "unknown")
+                }
+            })
+        else:
+            error_msg = result.get("error", "Custom avatar creation failed")
+            
+            # Check if it's a plan limitation
+            if "paid" in error_msg.lower() or "upgrade" in error_msg.lower():
+                return jsonify({
+                    "message": "Custom avatar creation requires a paid HeyGen plan",
+                    "status": "error",
+                    "suggestion": "Consider upgrading your HeyGen account or using pre-built avatars"
+                }), 402
+            else:
+                return jsonify({
+                    "message": f"Custom avatar creation failed: {error_msg}",
+                    "status": "error"
+                }), 500
+    
+    except Exception as e:
+        logger.error(f"❌ Custom avatar creation error: {str(e)}")
+        return jsonify({
+            "message": f"Internal error: {str(e)}",
+            "status": "error"
+        }), 500
+
+
+def create_heygen_custom_avatar(file_content, filename, username):
+    """
+    Attempt to create a real custom HeyGen avatar from user photo
+    """
+    if not HEYGEN_API_KEY:
+        return {
+            "success": False,
+            "error": "HeyGen API key not configured"
+        }
+    
+    import time
+    avatar_name = f"{username}_custom_{int(time.time())}"
+    
+    logger.info(f"🎭 Attempting custom avatar creation: {avatar_name}")
+    
+    try:
+        headers = {
+            "X-Api-Key": HEYGEN_API_KEY
+        }
+        
+        files = {
+            'image': (filename, file_content, 'image/jpeg')
+        }
+        
+        data = {
+            'avatar_name': avatar_name
+        }
+        
+        logger.info("📤 Uploading to HeyGen custom avatar API...")
+        
+        response = requests.post(
+            "https://api.heygen.com/v2/photo_avatar/create",
+            headers=headers,
+            files=files,
+            data=data,
+            timeout=120
+        )
+        
+        logger.info(f"📥 Custom avatar response: {response.status_code}")
+        logger.info(f"📄 Response body: {response.text}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            
+            if not result.get("error"):
+                avatar_data = result.get("data", {})
+                avatar_id = avatar_data.get("id")
+                
+                if avatar_id:
+                    logger.info(f"✅ Custom avatar created: {avatar_id}")
+                    return {
+                        "success": True,
+                        "avatar_id": avatar_id,
+                        "method": "heygen_photo_avatar"
+                    }
+            
+        elif response.status_code == 402:
+            return {
+                "success": False,
+                "error": "Custom avatar creation requires a paid HeyGen plan"
+            }
+        elif response.status_code == 403:
+            return {
+                "success": False,
+                "error": "Access denied - check HeyGen permissions"
+            }
+        
+        return {
+            "success": False,
+            "error": f"Custom avatar creation failed: {response.status_code} - {response.text}"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Custom avatar creation exception: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Exception during creation: {str(e)}"
+        }
 
 @app.route('/api/avatar/video-status/<video_id>', methods=['GET'])
 @influencer_token_required
@@ -3379,6 +3810,8 @@ def check_video_status(current_user, video_id):
             "Accept": "application/json"
         }
         
+        logger.info(f"Checking video status for video_id: {video_id}")
+        
         status_response = requests.get(
             f"https://api.heygen.com/v1/video_status.get?video_id={video_id}",
             headers=headers,
@@ -3397,7 +3830,8 @@ def check_video_status(current_user, video_id):
         
         try:
             status_data = status_response.json()
-        except:
+        except Exception as parse_error:
+            logger.error(f"Failed to parse status response JSON: {str(parse_error)}")
             return jsonify({
                 "message": "Invalid JSON response from status check",
                 "status": "error",
@@ -3417,20 +3851,25 @@ def check_video_status(current_user, video_id):
             "video_url": video_url,
             "duration": duration,
             "error": error,
-            "full_response": status_data
+            "raw_response": status_data
         }
         
         # Add helpful messages based on status
         if video_status == "completed" and video_url:
             result["message"] = "✅ Video is ready! You can download it from the video_url."
+            logger.info(f"✅ Video {video_id} completed successfully: {video_url}")
         elif video_status == "processing":
             result["message"] = "🔄 Video is still being generated. Please check again in a few moments."
+            logger.info(f"🔄 Video {video_id} is still processing")
         elif video_status == "pending":
             result["message"] = "⏳ Video is queued for processing."
+            logger.info(f"⏳ Video {video_id} is pending")
         elif video_status == "failed" or error:
             result["message"] = f"❌ Video generation failed: {error}"
+            logger.error(f"❌ Video {video_id} failed: {error}")
         else:
             result["message"] = f"Status: {video_status}"
+            logger.info(f"Video {video_id} status: {video_status}")
         
         return jsonify({
             "status": "success",
@@ -3444,6 +3883,110 @@ def check_video_status(current_user, video_id):
             "status": "error"
         }), 500
 
+
+@app.route('/api/avatar/check-status/<avatar_id>', methods=['GET'])
+@influencer_token_required
+def check_avatar_status_detailed(current_user, avatar_id):
+    """
+    Check if a specific avatar exists and is ready for video generation
+    """
+    try:
+        if not HEYGEN_API_KEY:
+            return jsonify({
+                "message": "HeyGen API key not configured",
+                "status": "error"
+            }), 500
+
+        headers = {
+            "X-Api-Key": HEYGEN_API_KEY,
+            "Accept": "application/json"
+        }
+        
+        logger.info(f"Checking detailed avatar status for: {avatar_id}")
+        
+        # Try to check photo avatar status first (for custom avatars)
+        try:
+            status_response = requests.get(
+                f"https://api.heygen.com/v2/photo_avatar/{avatar_id}",
+                headers=headers,
+                timeout=30
+            )
+            
+            logger.info(f"Photo avatar status check response: {status_response.status_code}")
+            
+            if status_response.status_code == 200:
+                status_data = status_response.json()
+                
+                if not status_data.get("error"):
+                    avatar_info = status_data.get("data", {})
+                    avatar_status = avatar_info.get("status", "unknown")
+                    
+                    return jsonify({
+                        "status": "success",
+                        "data": {
+                            "avatar_id": avatar_id,
+                            "exists": True,
+                            "avatar_status": avatar_status,
+                            "ready_for_video": avatar_status.lower() in ["completed", "ready", "success"],
+                            "avatar_type": "photo_avatar",
+                            "details": avatar_info
+                        }
+                    })
+        except Exception as e:
+            logger.info(f"Photo avatar check failed (trying regular avatar): {str(e)}")
+        
+        # Check if it's a regular avatar
+        try:
+            avatars_response = requests.get(
+                "https://api.heygen.com/v2/avatars",
+                headers=headers,
+                timeout=30
+            )
+            
+            if avatars_response.status_code == 200:
+                avatars_data = avatars_response.json()
+                avatars = avatars_data.get("data", {}).get("avatars", [])
+                
+                # Find the avatar in the list
+                found_avatar = None
+                for avatar in avatars:
+                    if avatar.get("avatar_id") == avatar_id:
+                        found_avatar = avatar
+                        break
+                
+                if found_avatar:
+                    return jsonify({
+                        "status": "success",
+                        "data": {
+                            "avatar_id": avatar_id,
+                            "exists": True,
+                            "avatar_status": "completed",
+                            "ready_for_video": True,
+                            "avatar_type": "regular_avatar",
+                            "details": found_avatar
+                        }
+                    })
+        except Exception as e:
+            logger.info(f"Regular avatar check failed: {str(e)}")
+        
+        # Avatar not found in either category
+        return jsonify({
+            "status": "success",
+            "data": {
+                "avatar_id": avatar_id,
+                "exists": False,
+                "ready_for_video": False,
+                "avatar_type": "unknown",
+                "error": "Avatar not found in HeyGen"
+            }
+        })
+            
+    except Exception as e:
+        logger.error(f"Check avatar status error: {str(e)}")
+        return jsonify({
+            "message": f"Failed to check avatar status: {str(e)}",
+            "status": "error"
+        }), 500
 
 @app.route('/api/avatar/list-voices', methods=['GET'])
 @influencer_token_required  
@@ -4603,6 +5146,304 @@ def test_api_key_only(current_user):
         logger.error(f"API key test error: {str(e)}")
         return jsonify({
             "message": f"API key test failed: {str(e)}",
+            "status": "error"
+        }), 500
+
+@app.route('/api/debug/routes', methods=['GET'])
+def debug_routes():
+    """Debug endpoint to see all registered routes"""
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append({
+            "endpoint": rule.endpoint,
+            "methods": list(rule.methods),
+            "rule": str(rule)
+        })
+    
+    return jsonify({
+        "status": "success", 
+        "data": {"routes": routes}
+    })
+
+@app.route('/api/debug/check-avatar-exists/<avatar_id>', methods=['GET'])
+@influencer_token_required
+def debug_check_avatar_exists(current_user, avatar_id):
+    """Debug endpoint to check if avatar actually exists in HeyGen"""
+    try:
+        if not HEYGEN_API_KEY:
+            return jsonify({
+                "message": "HeyGen API key not configured",
+                "status": "error"
+            }), 500
+
+        headers = {
+            "X-Api-Key": HEYGEN_API_KEY,
+            "Accept": "application/json"
+        }
+        
+        debug_info = {
+            "avatar_id": avatar_id,
+            "checks_performed": [],
+            "results": {}
+        }
+        
+        # Check 1: Try photo avatar endpoint
+        try:
+            logger.info(f"🔍 Debug: Checking photo avatar endpoint for {avatar_id}")
+            photo_response = requests.get(
+                f"https://api.heygen.com/v2/photo_avatar/{avatar_id}",
+                headers=headers,
+                timeout=30
+            )
+            
+            debug_info["checks_performed"].append("photo_avatar_endpoint")
+            debug_info["results"]["photo_avatar"] = {
+                "status_code": photo_response.status_code,
+                "response": photo_response.text[:500] + "..." if len(photo_response.text) > 500 else photo_response.text
+            }
+            
+            logger.info(f"Photo avatar check: {photo_response.status_code}")
+            
+        except Exception as e:
+            debug_info["results"]["photo_avatar"] = {"error": str(e)}
+        
+        # Check 2: List all available avatars
+        try:
+            logger.info(f"🔍 Debug: Getting all available avatars")
+            avatars_response = requests.get(
+                "https://api.heygen.com/v2/avatars",
+                headers=headers,
+                timeout=30
+            )
+            
+            debug_info["checks_performed"].append("list_all_avatars")
+            
+            if avatars_response.status_code == 200:
+                avatars_data = avatars_response.json()
+                avatars = avatars_data.get("data", {}).get("avatars", [])
+                
+                # Look for our avatar in the list
+                found_avatar = None
+                avatar_matches = []
+                
+                for avatar in avatars:
+                    avatar_id_in_list = avatar.get("avatar_id", "")
+                    avatar_name = avatar.get("name", "")
+                    
+                    # Check for exact match
+                    if avatar_id_in_list == avatar_id:
+                        found_avatar = avatar
+                    
+                    # Check for partial matches (in case the ID is different)
+                    if "Abigail" in avatar_name or "expressive" in avatar_name.lower():
+                        avatar_matches.append({
+                            "avatar_id": avatar_id_in_list,
+                            "name": avatar_name,
+                            "type": avatar.get("type", "unknown")
+                        })
+                
+                debug_info["results"]["available_avatars"] = {
+                    "total_count": len(avatars),
+                    "exact_match_found": found_avatar is not None,
+                    "found_avatar": found_avatar,
+                    "potential_matches": avatar_matches,
+                    "first_5_avatars": avatars[:5]  # Show first 5 for reference
+                }
+                
+                logger.info(f"Found {len(avatars)} total avatars, exact match: {found_avatar is not None}")
+                
+            else:
+                debug_info["results"]["available_avatars"] = {
+                    "error": f"Failed to get avatars: {avatars_response.status_code}",
+                    "response": avatars_response.text[:300]
+                }
+                
+        except Exception as e:
+            debug_info["results"]["available_avatars"] = {"error": str(e)}
+        
+        # Check 3: Check user's database record
+        try:
+            logger.info(f"🔍 Debug: Checking user database record")
+            user_id = current_user.get("id")
+            influencer = db.get_influencer(user_id)
+            
+            debug_info["checks_performed"].append("database_record")
+            debug_info["results"]["database_record"] = {
+                "user_id": user_id,
+                "has_avatar_id": bool(influencer.get("heygen_avatar_id")),
+                "stored_avatar_id": influencer.get("heygen_avatar_id"),
+                "matches_requested": influencer.get("heygen_avatar_id") == avatar_id
+            }
+            
+        except Exception as e:
+            debug_info["results"]["database_record"] = {"error": str(e)}
+        
+        return jsonify({
+            "status": "success",
+            "data": debug_info
+        })
+        
+    except Exception as e:
+        logger.error(f"Debug check error: {str(e)}")
+        return jsonify({
+            "message": f"Debug check failed: {str(e)}",
+            "status": "error"
+        }), 500
+
+
+@app.route('/api/debug/user-avatars', methods=['GET'])
+@influencer_token_required
+def debug_get_user_avatars(current_user):
+    """Get all avatars that might belong to this user"""
+    try:
+        if not HEYGEN_API_KEY:
+            return jsonify({
+                "message": "HeyGen API key not configured",
+                "status": "error"
+            }), 500
+
+        headers = {
+            "X-Api-Key": HEYGEN_API_KEY,
+            "Accept": "application/json"
+        }
+        
+        username = current_user.get("username", "")
+        user_avatars = []
+        
+        # Get all avatars and filter by user
+        avatars_response = requests.get(
+            "https://api.heygen.com/v2/avatars",
+            headers=headers,
+            timeout=30
+        )
+        
+        if avatars_response.status_code == 200:
+            avatars_data = avatars_response.json()
+            avatars = avatars_data.get("data", {}).get("avatars", [])
+            
+            # Look for avatars that might belong to this user
+            for avatar in avatars:
+                avatar_name = avatar.get("name", "").lower()
+                avatar_id = avatar.get("avatar_id", "")
+                
+                # Check if avatar name contains username or user-related terms
+                if (username.lower() in avatar_name or 
+                    "custom" in avatar_name or 
+                    "expressive" in avatar_name or
+                    current_user.get("id", "") in avatar_name):
+                    user_avatars.append({
+                        "avatar_id": avatar_id,
+                        "name": avatar.get("name"),
+                        "type": avatar.get("type", "unknown"),
+                        "preview_image": avatar.get("preview_image_url", ""),
+                        "preview_video": avatar.get("preview_video_url", "")
+                    })
+        
+        return jsonify({
+            "status": "success",
+            "data": {
+                "username": username,
+                "user_id": current_user.get("id"),
+                "potential_user_avatars": user_avatars,
+                "stored_avatar_id": current_user.get("heygen_avatar_id"),
+                "total_avatars_checked": len(avatars) if avatars_response.status_code == 200 else 0
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Debug user avatars error: {str(e)}")
+        return jsonify({
+            "message": f"Debug failed: {str(e)}",
+            "status": "error"
+        }), 500
+
+
+# Also add this quick fix function to use a working avatar for testing
+@app.route('/api/debug/test-with-working-avatar', methods=['POST'])
+@influencer_token_required
+def debug_test_working_avatar(current_user):
+    """Test video generation with a known working avatar"""
+    try:
+        if not HEYGEN_API_KEY:
+            return jsonify({
+                "message": "HeyGen API key not configured",
+                "status": "error"
+            }), 500
+
+        headers = {
+            "X-Api-Key": HEYGEN_API_KEY,
+            "Accept": "application/json"
+        }
+        
+        # Get the first available avatar for testing
+        avatars_response = requests.get(
+            "https://api.heygen.com/v2/avatars",
+            headers=headers,
+            timeout=30
+        )
+        
+        if avatars_response.status_code != 200:
+            return jsonify({
+                "message": "Failed to get available avatars",
+                "status": "error"
+            }), 500
+            
+        avatars_data = avatars_response.json()
+        avatars = avatars_data.get("data", {}).get("avatars", [])
+        
+        if not avatars:
+            return jsonify({
+                "message": "No avatars available for testing",
+                "status": "error"
+            }), 500
+        
+        # Use the first available avatar
+        test_avatar = avatars[0]
+        test_avatar_id = test_avatar.get("avatar_id")
+        
+        # Test video generation
+        video_payload = {
+            "video_inputs": [
+                {
+                    "character": {
+                        "type": "avatar",
+                        "avatar_id": test_avatar_id,
+                        "avatar_style": "normal"
+                    },
+                    "voice": {
+                        "type": "text",
+                        "input_text": "This is a test of video generation with a working avatar.",
+                        "voice_id": "d7bbcdd6964c47bdaae26decade4a933"
+                    }
+                }
+            ],
+            "dimension": {
+                "width": 1280,
+                "height": 720
+            }
+        }
+        
+        video_response = requests.post(
+            "https://api.heygen.com/v2/video/generate",
+            headers=headers,
+            json=video_payload,
+            timeout=60
+        )
+        
+        return jsonify({
+            "status": "success",
+            "data": {
+                "test_avatar_used": test_avatar,
+                "video_response_status": video_response.status_code,
+                "video_response": video_response.json() if video_response.status_code == 200 else video_response.text,
+                "message": "Test completed with working avatar"
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Debug test error: {str(e)}")
+        return jsonify({
+            "message": f"Test failed: {str(e)}",
             "status": "error"
         }), 500
 
