@@ -3,6 +3,7 @@ from supabase import create_client, Client
 from typing import Optional, Dict, List
 import logging
 import uuid
+from datetime import datetime, timezone
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -18,8 +19,9 @@ class Database:
         self.initialize_tables()
         
     def initialize_tables(self):
-        """Create tables if they don't exist using standard REST API"""
+        """Check if tables exist using Supabase REST API"""
         
+        # Check influencers table
         try:
             self.supabase.table("influencers").select("*").limit(1).execute()
             logger.info("Influencers table exists")
@@ -27,48 +29,23 @@ class Database:
             logger.error(f"Influencers table doesn't exist: {str(e)}")
             print("Please create the 'influencers' table manually in Supabase dashboard")
 
-        # 2. Check if affiliate_links table exists - UPDATED SCHEMA
+        # Check affiliate_links table
         try:
             self.supabase.table("affiliate_links").select("*").limit(1).execute()
             logger.info("Affiliate links table exists")
         except Exception as e:
             logger.error(f"Affiliate links table doesn't exist: {str(e)}")
-            print("Please create the 'affiliate_links' table manually in Supabase dashboard with the following schema:")
-            print("""
-            CREATE TABLE affiliate_links (
-                id TEXT PRIMARY KEY,
-                influencer_id TEXT NOT NULL,
-                platform TEXT NOT NULL CHECK (platform IN ('rakuten', 'amazon', 'shareasale', 'cj_affiliate')),
-                affiliate_id TEXT NOT NULL,
-                is_primary BOOLEAN NOT NULL DEFAULT FALSE,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                FOREIGN KEY (influencer_id) REFERENCES influencers(id) ON DELETE CASCADE,
-                UNIQUE(influencer_id, platform)
-            );
-            """)
+            print("Please create the 'affiliate_links' table manually in Supabase dashboard")
 
-        # 3. Check if chat_interactions table exists - UPDATED SCHEMA (no fan_id)
+        # Check chat_interactions table
         try:
             self.supabase.table("chat_interactions").select("*").limit(1).execute()
             logger.info("Chat interactions table exists")
         except Exception as e:
             logger.error(f"Chat interactions table doesn't exist: {str(e)}")
-            print("Please create the 'chat_interactions' table manually in Supabase dashboard with the following schema:")
-            print("""
-            CREATE TABLE chat_interactions (
-                id TEXT PRIMARY KEY,
-                influencer_id TEXT NOT NULL,
-                session_id TEXT, -- Anonymous session ID for tracking
-                user_message TEXT NOT NULL,
-                bot_response TEXT NOT NULL,
-                product_recommendations BOOLEAN NOT NULL DEFAULT FALSE,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                FOREIGN KEY (influencer_id) REFERENCES influencers(id) ON DELETE CASCADE
-            );
-            """)
+            print("Please create the 'chat_interactions' table manually in Supabase dashboard")
 
-        # 4. Check if influencer_promotion_settings table exists (keep but update)
+        # Check influencer_promotion_settings table
         try:
             self.supabase.table("influencer_promotion_settings").select("*").limit(1).execute()
             logger.info("Influencer promotion settings table exists")
@@ -76,28 +53,15 @@ class Database:
             logger.error(f"Influencer promotion settings table doesn't exist: {str(e)}")
             print("Please create the 'influencer_promotion_settings' table manually in Supabase dashboard")
 
-        # 5. Check if conversation_counters table exists - UPDATED SCHEMA (no fan_id)
+        # Check conversation_counters table
         try:
             self.supabase.table("conversation_counters").select("*").limit(1).execute()
             logger.info("Conversation counters table exists")
         except Exception as e:
             logger.error(f"Conversation counters table doesn't exist: {str(e)}")
-            print("Please create the 'conversation_counters' table manually in Supabase dashboard with the following schema:")
-            print("""
-            CREATE TABLE conversation_counters (
-                id TEXT PRIMARY KEY,
-                influencer_id TEXT NOT NULL,
-                session_id TEXT NOT NULL, -- Anonymous session ID
-                message_count INTEGER NOT NULL DEFAULT 0,
-                last_promotion_at TIMESTAMP WITH TIME ZONE,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                FOREIGN KEY (influencer_id) REFERENCES influencers(id) ON DELETE CASCADE,
-                UNIQUE(influencer_id, session_id)
-            );
-            """)
+            print("Please create the 'conversation_counters' table manually in Supabase dashboard")
 
-        # 6. Check if influencer_products table exists (keep this)
+        # Check influencer_products table
         try:
             self.supabase.table("influencer_products").select("*").limit(1).execute()
             logger.info("Influencer products table exists")
@@ -105,60 +69,64 @@ class Database:
             logger.error(f"Influencer products table doesn't exist: {str(e)}")
             print("Please create the 'influencer_products' table manually in Supabase dashboard")
 
-        # Add embed_configurations table check
+        # Check embed_configurations table
         try:
             self.supabase.table("embed_configurations").select("*").limit(1).execute()
             logger.info("Embed configurations table exists")
         except Exception as e:
             logger.error(f"Embed configurations table doesn't exist: {str(e)}")
-            print("Please create the 'embed_configurations' table manually in Supabase dashboard with the following schema:")
-            print("""
-            CREATE TABLE embed_configurations (
-                id TEXT PRIMARY KEY,
-                influencer_id TEXT NOT NULL,
-                width TEXT NOT NULL DEFAULT '400px',
-                height TEXT NOT NULL DEFAULT '600px',
-                position TEXT NOT NULL DEFAULT 'bottom-right',
-                theme TEXT NOT NULL DEFAULT 'default',
-                trigger_text TEXT NOT NULL DEFAULT 'Chat with me!',
-                auto_open BOOLEAN NOT NULL DEFAULT FALSE,
-                custom_css TEXT,
-                is_active BOOLEAN NOT NULL DEFAULT TRUE,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                FOREIGN KEY (influencer_id) REFERENCES influencers(id) ON DELETE CASCADE,
-                UNIQUE(influencer_id)
-            );
-            """)
-            
-    def create_influencer(self, influencer_data: Dict) -> Optional[Dict]:
-        """Create a new influencer with authentication credentials"""
-        required_fields = {'id', 'username', 'email', 'password_hash'}
-        if not all(field in influencer_data for field in required_fields):
-            logger.error(f"Missing required fields: {required_fields}")
-            return None
+            print("Please create the 'embed_configurations' table manually in Supabase dashboard")
 
-        # Generate chat page URL
-        username = influencer_data['username']
-        influencer_data['chat_page_url'] = f"/chat/{username}"
-        
+    # =============================================================================
+    # INFLUENCER MANAGEMENT
+    # =============================================================================
+    
+    def create_influencer(self, user_data: Dict) -> Optional[Dict]:
+        """Create influencer with voice preference fields using Supabase"""
         try:
-            response = self.supabase.table('influencers').insert(influencer_data).execute()
-            return response.data[0] if response.data else None
+            # Set default voice if not provided
+            if 'preferred_voice_id' not in user_data:
+                user_data['preferred_voice_id'] = '2d5b0e6cf36f460aa7fc47e3eee4ba54'
+            
+            # Set timestamps
+            now = datetime.now(timezone.utc).isoformat()
+            user_data['created_at'] = user_data.get('created_at', now)
+            user_data['updated_at'] = now
+            
+            # Insert into Supabase
+            response = self.supabase.table('influencers').insert(user_data).execute()
+            
+            if response.data:
+                created_user = response.data[0]
+                logger.info(f"✅ Created new influencer: {user_data['username']}")
+                return created_user
+            else:
+                logger.error("❌ No data returned from create operation")
+                return None
+                
         except Exception as e:
-            logger.error(f"Error creating influencer: {str(e)}")
+            logger.error(f"❌ Error creating influencer: {e}")
             return None
 
     def get_influencer_by_username(self, username: str) -> Optional[Dict]:
-        """Get influencer by username"""
+        """Get influencer by username with voice preference using Supabase"""
         try:
             response = self.supabase.table('influencers') \
                 .select('*') \
                 .eq('username', username) \
                 .execute()
-            return response.data[0] if response.data else None
+            
+            if response.data:
+                influencer = response.data[0]
+                # Ensure voice preference exists
+                if not influencer.get('preferred_voice_id'):
+                    influencer['preferred_voice_id'] = '2d5b0e6cf36f460aa7fc47e3eee4ba54'
+                return influencer
+            
+            return None
+            
         except Exception as e:
-            logger.error(f"Error getting influencer: {str(e)}")
+            logger.error(f"❌ Error getting influencer by username: {e}")
             return None
 
     def get_influencer_by_email(self, email: str) -> Optional[Dict]:
@@ -170,35 +138,55 @@ class Database:
                 .execute()
             return response.data[0] if response.data else None
         except Exception as e:
-            logger.error(f"Error getting influencer: {str(e)}")
+            logger.error(f"Error getting influencer by email: {str(e)}")
             return None
 
     def get_influencer(self, influencer_id: str) -> Optional[Dict]:
-        """Get influencer by ID"""
+        """Get influencer with proper voice preference retrieval using Supabase"""
         try:
             response = self.supabase.table('influencers') \
                 .select('*') \
                 .eq('id', influencer_id) \
                 .execute()
-            return response.data[0] if response.data else None
+            
+            if response.data:
+                influencer = response.data[0]
+                # Ensure voice preference exists
+                if not influencer.get('preferred_voice_id'):
+                    influencer['preferred_voice_id'] = '2d5b0e6cf36f460aa7fc47e3eee4ba54'
+                return influencer
+            
+            return None
+            
         except Exception as e:
-            logger.error(f"Error getting influencer: {str(e)}")
+            logger.error(f"❌ Error getting influencer: {e}")
             return None
 
-    def update_influencer(self, influencer_id: str, updates: Dict) -> bool:
-        """Update influencer data"""
-        if not updates:
-            return False
-
+    def update_influencer(self, influencer_id: str, update_data: Dict) -> bool:
+        """Update influencer data with proper voice preference handling using Supabase"""
         try:
-            updates['updated_at'] = 'now()'
+            # Add updated timestamp
+            update_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+            
+            # Update in Supabase
             response = self.supabase.table('influencers') \
-                .update(updates) \
+                .update(update_data) \
                 .eq('id', influencer_id) \
                 .execute()
-            return True
+            
+            success = bool(response.data)
+            
+            if success:
+                logger.info(f"✅ Successfully updated influencer {influencer_id}")
+                if 'preferred_voice_id' in update_data:
+                    logger.info(f"🎤 Voice preference updated to: {update_data['preferred_voice_id']}")
+            else:
+                logger.warning(f"⚠️ No rows affected when updating influencer {influencer_id}")
+            
+            return success
+            
         except Exception as e:
-            logger.error(f"Error updating influencer: {str(e)}")
+            logger.error(f"❌ Error updating influencer: {e}")
             return False
 
     def delete_influencer(self, influencer_id: str) -> bool:
@@ -224,7 +212,97 @@ class Database:
             logger.error(f"Error getting all influencers: {str(e)}")
             return []
 
-    # Promotion Settings Methods
+    def update_avatar_status(self, influencer_id: str, avatar_data: Dict) -> bool:
+        """Update avatar status using Supabase"""
+        try:
+            # Extract avatar data
+            update_data = {
+                'updated_at': datetime.now(timezone.utc).isoformat()
+            }
+            
+            if 'heygen_avatar_id' in avatar_data:
+                update_data['heygen_avatar_id'] = avatar_data['heygen_avatar_id']
+            if 'avatar_training_status' in avatar_data:
+                update_data['avatar_training_status'] = avatar_data['avatar_training_status']
+            if 'avatar_type' in avatar_data:
+                update_data['avatar_type'] = avatar_data['avatar_type']
+            
+            # Update in Supabase
+            response = self.supabase.table('influencers') \
+                .update(update_data) \
+                .eq('id', influencer_id) \
+                .execute()
+            
+            success = bool(response.data)
+            
+            if success:
+                logger.info(f"✅ Avatar status updated for influencer {influencer_id}")
+                if 'heygen_avatar_id' in avatar_data:
+                    logger.info(f"🎭 Avatar ID: {avatar_data['heygen_avatar_id']}")
+                if 'avatar_training_status' in avatar_data:
+                    logger.info(f"📊 Status: {avatar_data['avatar_training_status']}")
+                if 'avatar_type' in avatar_data:
+                    logger.info(f"🎬 Type: {avatar_data['avatar_type']}")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"❌ Error updating avatar status: {e}")
+            return False
+
+    def get_avatar_info(self, influencer_id: str) -> Optional[Dict]:
+        """Get avatar information for an influencer"""
+        try:
+            response = self.supabase.table('influencers') \
+                .select('heygen_avatar_id, heygen_asset_id, original_asset_path, avatar_training_status, avatar_created_at, avatar_ready_at') \
+                .eq('id', influencer_id) \
+                .execute()
+            
+            return response.data[0] if response.data else None
+            
+        except Exception as e:
+            logger.error(f"Error getting avatar info: {str(e)}")
+            return None
+
+    def set_avatar_ready(self, influencer_id: str) -> bool:
+        """Mark an avatar as ready for video generation"""
+        try:
+            updates = {
+                'avatar_training_status': 'completed',
+                'avatar_ready_at': datetime.now(timezone.utc).isoformat(),
+                'updated_at': datetime.now(timezone.utc).isoformat()
+            }
+            
+            response = self.supabase.table('influencers') \
+                .update(updates) \
+                .eq('id', influencer_id) \
+                .execute()
+            
+            return len(response.data) > 0
+            
+        except Exception as e:
+            logger.error(f"Error setting avatar ready: {str(e)}")
+            return False
+
+    def get_influencers_with_pending_avatars(self) -> List[Dict]:
+        """Get influencers with avatars that are still training"""
+        try:
+            response = self.supabase.table('influencers') \
+                .select('id, username, heygen_avatar_id, avatar_training_status, avatar_created_at') \
+                .not_.is_('heygen_avatar_id', 'null') \
+                .in_('avatar_training_status', ['pending', 'processing', 'training']) \
+                .execute()
+            
+            return response.data
+            
+        except Exception as e:
+            logger.error(f"Error getting pending avatars: {str(e)}")
+            return []
+
+    # =============================================================================
+    # PROMOTION SETTINGS
+    # =============================================================================
+    
     def get_promotion_settings(self, influencer_id: str) -> Optional[Dict]:
         """Get promotion settings for an influencer"""
         try:
@@ -268,7 +346,7 @@ class Database:
             
             if settings_id:
                 # Update existing settings
-                settings['updated_at'] = 'now()'
+                settings['updated_at'] = datetime.now(timezone.utc).isoformat()
                 response = self.supabase.table('influencer_promotion_settings') \
                     .update(settings) \
                     .eq('id', settings_id) \
@@ -285,14 +363,17 @@ class Database:
             logger.error(f"Error updating promotion settings: {str(e)}")
             return False
 
-    # Influencer Products Methods
+    # =============================================================================
+    # INFLUENCER PRODUCTS
+    # =============================================================================
+    
     def add_influencer_product(self, influencer_id: str, product_name: str, product_query: str, is_default: bool = False) -> Optional[Dict]:
         """Add a product for an influencer to promote"""
         try:
             # If this is the default product, unset any existing default
             if is_default:
                 self.supabase.table('influencer_products') \
-                    .update({"is_default": False, "updated_at": 'now()'}) \
+                    .update({"is_default": False, "updated_at": datetime.now(timezone.utc).isoformat()}) \
                     .eq('influencer_id', influencer_id) \
                     .eq('is_default', True) \
                     .execute()
@@ -377,14 +458,14 @@ class Database:
             
             # Unset any existing default
             self.supabase.table('influencer_products') \
-                .update({"is_default": False, "updated_at": 'now()'}) \
+                .update({"is_default": False, "updated_at": datetime.now(timezone.utc).isoformat()}) \
                 .eq('influencer_id', influencer_id) \
                 .eq('is_default', True) \
                 .execute()
                 
             # Set the new default
             self.supabase.table('influencer_products') \
-                .update({"is_default": True, "updated_at": 'now()'}) \
+                .update({"is_default": True, "updated_at": datetime.now(timezone.utc).isoformat()}) \
                 .eq('id', product_id) \
                 .execute()
                 
@@ -396,8 +477,11 @@ class Database:
         except Exception as e:
             logger.error(f"Error setting default product: {str(e)}")
             return False
-        
-    # Embed configuration methods
+
+    # =============================================================================
+    # EMBED CONFIGURATIONS
+    # =============================================================================
+    
     def get_embed_configuration(self, influencer_id: str) -> Optional[Dict]:
         """Get embed configuration for an influencer"""
         try:
@@ -427,7 +511,7 @@ class Database:
                 "auto_open": config.get("auto_open", False),
                 "custom_css": config.get("custom_css", ""),
                 "is_active": config.get("is_active", True),
-                "updated_at": 'now()'
+                "updated_at": datetime.now(timezone.utc).isoformat()
             }
             
             if existing_config:
@@ -447,6 +531,7 @@ class Database:
         except Exception as e:
             logger.error(f"Error saving embed configuration: {str(e)}")
             return None
+
     def get_influencer_with_embed_config(self, influencer_id: str) -> Optional[Dict]:
         """Get influencer data including embed configuration"""
         try:
@@ -477,9 +562,9 @@ class Database:
     def get_embed_analytics(self, influencer_id: str, days: int = 30) -> Dict:
         """Get embed-specific analytics for an influencer"""
         try:
-            from datetime import datetime, timedelta
+            from datetime import timedelta
             
-            start_date = datetime.utcnow() - timedelta(days=days)
+            start_date = datetime.now(timezone.utc) - timedelta(days=days)
             
             # Get all chat interactions for the period
             response = self.supabase.table('chat_interactions') \
@@ -517,7 +602,10 @@ class Database:
                 "period_days": days
             }
 
-    # UPDATE AFFILIATE METHODS
+    # =============================================================================
+    # AFFILIATE LINKS
+    # =============================================================================
+    
     def add_affiliate_link(self, influencer_id: str, platform: str, affiliate_id: str, is_primary: bool = False) -> Optional[Dict]:
         """Add an affiliate link for an influencer"""
         try:
@@ -530,7 +618,7 @@ class Database:
             # If this is set as primary, unset any existing primary
             if is_primary:
                 self.supabase.table('affiliate_links') \
-                    .update({"is_primary": False, "updated_at": 'now()'}) \
+                    .update({"is_primary": False, "updated_at": datetime.now(timezone.utc).isoformat()}) \
                     .eq('influencer_id', influencer_id) \
                     .eq('is_primary', True) \
                     .execute()
@@ -587,13 +675,13 @@ class Database:
         try:
             # Unset current primary
             self.supabase.table('affiliate_links') \
-                .update({"is_primary": False, "updated_at": 'now()'}) \
+                .update({"is_primary": False, "updated_at": datetime.now(timezone.utc).isoformat()}) \
                 .eq('influencer_id', influencer_id) \
                 .execute()
             
             # Set new primary
             response = self.supabase.table('affiliate_links') \
-                .update({"is_primary": True, "updated_at": 'now()'}) \
+                .update({"is_primary": True, "updated_at": datetime.now(timezone.utc).isoformat()}) \
                 .eq('influencer_id', influencer_id) \
                 .eq('platform', platform) \
                 .execute()
@@ -616,7 +704,10 @@ class Database:
             logger.error(f"Error deleting affiliate link: {str(e)}")
             return False
 
-    # UPDATE CONVERSATION COUNTER METHODS (replace fan_id with session_id)
+    # =============================================================================
+    # CONVERSATION COUNTERS
+    # =============================================================================
+    
     def get_conversation_counter(self, influencer_id: str, session_id: str) -> Optional[Dict]:
         """Get the conversation counter between an influencer and anonymous session"""
         try:
@@ -658,11 +749,11 @@ class Database:
             
             updates = {
                 "message_count": counter.get("message_count", 0) + 1,
-                "updated_at": 'now()'
+                "updated_at": datetime.now(timezone.utc).isoformat()
             }
             
             if was_promotion:
-                updates["last_promotion_at"] = 'now()'
+                updates["last_promotion_at"] = datetime.now(timezone.utc).isoformat()
             
             if counter_id:
                 # Update existing counter
@@ -679,155 +770,3 @@ class Database:
         except Exception as e:
             logger.error(f"Error incrementing conversation counter: {str(e)}")
             return None
-
-    def reset_conversation_counter(self, influencer_id: str, session_id: str) -> bool:
-        """Reset the conversation counter between an influencer and session"""
-        try:
-            # Get current counter
-            counter = self.get_conversation_counter(influencer_id, session_id)
-            counter_id = counter.get("id")
-            
-            if counter_id:
-                # Update existing counter
-                updates = {
-                    "message_count": 0,
-                    "last_promotion_at": None,
-                    "updated_at": 'now()'
-                }
-                
-                self.supabase.table('conversation_counters') \
-                    .update(updates) \
-                    .eq('id', counter_id) \
-                    .execute()
-                    
-            return True
-        except Exception as e:
-            logger.error(f"Error resetting conversation counter: {str(e)}")
-            return False
-
-    # UPDATE CHAT INTERACTION LOGGING (replace fan_id with session_id)
-    def log_chat_interaction(self, influencer_id: str, user_message: str, 
-                            bot_response: str, product_recommendations: bool,
-                            session_id: Optional[str] = None) -> Optional[Dict]:
-        """Log a chat interaction"""
-        try:
-            interaction_data = {
-                "id": str(uuid.uuid4()),
-                "influencer_id": influencer_id,
-                "session_id": session_id,
-                "user_message": user_message,
-                "bot_response": bot_response,
-                "product_recommendations": product_recommendations
-            }
-            
-            response = self.supabase.table('chat_interactions').insert(interaction_data).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            logger.error(f"Error logging chat interaction: {str(e)}")
-            return None
-    
-    def get_chat_history(self, influencer_id: str, session_id: Optional[str] = None, limit: int = 10) -> List[Dict]:
-        """Get chat history for a session with an influencer"""
-        try:
-            query = self.supabase.table('chat_interactions') \
-                .select('*') \
-                .eq('influencer_id', influencer_id) \
-                .order('created_at', {'ascending': False}) \
-                .limit(limit)
-                
-            if session_id:
-                query = query.eq('session_id', session_id)
-                
-            response = query.execute()
-            return response.data
-        except Exception as e:
-            logger.error(f"Error getting chat history: {str(e)}")
-            return []
-
-    def update_avatar_status(self, influencer_id: str, avatar_data: Dict) -> bool:
-        """Update avatar-related information for an influencer"""
-        try:
-            updates = {}
-            
-            # Add avatar-specific fields
-            if 'heygen_avatar_id' in avatar_data:
-                updates['heygen_avatar_id'] = avatar_data['heygen_avatar_id']
-            
-            if 'heygen_asset_id' in avatar_data:
-                updates['heygen_asset_id'] = avatar_data['heygen_asset_id']
-            
-            if 'original_asset_path' in avatar_data:
-                updates['original_asset_path'] = avatar_data['original_asset_path']
-            
-            if 'avatar_training_status' in avatar_data:
-                updates['avatar_training_status'] = avatar_data['avatar_training_status']
-            
-            if 'avatar_created_at' in avatar_data:
-                updates['avatar_created_at'] = avatar_data['avatar_created_at']
-            
-            if 'avatar_ready_at' in avatar_data:
-                updates['avatar_ready_at'] = avatar_data['avatar_ready_at']
-            
-            # Add timestamp
-            updates['updated_at'] = 'now()'
-            
-            # Update the influencer record
-            response = self.supabase.table('influencers') \
-                .update(updates) \
-                .eq('id', influencer_id) \
-                .execute()
-            
-            return len(response.data) > 0
-            
-        except Exception as e:
-            logger.error(f"Error updating avatar status: {str(e)}")
-            return False
-
-    def get_avatar_info(self, influencer_id: str) -> Optional[Dict]:
-        """Get avatar information for an influencer"""
-        try:
-            response = self.supabase.table('influencers') \
-                .select('heygen_avatar_id, heygen_asset_id, original_asset_path, avatar_training_status, avatar_created_at, avatar_ready_at') \
-                .eq('id', influencer_id) \
-                .execute()
-            
-            return response.data[0] if response.data else None
-            
-        except Exception as e:
-            logger.error(f"Error getting avatar info: {str(e)}")
-            return None
-
-    def set_avatar_ready(self, influencer_id: str) -> bool:
-        """Mark an avatar as ready for video generation"""
-        try:
-            updates = {
-                'avatar_training_status': 'completed',
-                'avatar_ready_at': 'now()',
-                'updated_at': 'now()'
-            }
-            
-            response = self.supabase.table('influencers') \
-                .update(updates) \
-                .eq('id', influencer_id) \
-                .execute()
-            
-            return len(response.data) > 0
-            
-        except Exception as e:
-            logger.error(f"Error setting avatar ready: {str(e)}")
-            return False
-
-    def get_influencers_with_pending_avatars(self) -> List[Dict]:
-        """Get influencers with avatars that are still training"""
-        try:
-            response = self.supabase.table('influencers') \
-                .select('id, username, heygen_avatar_id, avatar_training_status, avatar_created_at') \
-                .not_.is_('heygen_avatar_id', 'null') \
-                .in_('avatar_training_status', ['pending', 'processing', 'training']) \
-                .execute()
-            
-            return response.data
-            
-        except Exception as e:
-            logger.error(f"Error getting pending avatars: {str(e)}")
-            return []

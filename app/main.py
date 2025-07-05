@@ -240,7 +240,6 @@ def generate_jwt_token(user_data):
 # =============================================================================
 
 class HeyGenAPI:
-    """HeyGen API client"""    
     @staticmethod
     def create_photo_avatar(image_file):
         """Create talking photo avatar from uploaded image using correct HeyGen API"""
@@ -264,17 +263,16 @@ class HeyGenAPI:
         # Upload image to HeyGen Talking Photo endpoint
         headers = {
             "x-api-key": Config.HEYGEN_API_KEY,
-            "Content-Type": "image/jpeg"  # HeyGen expects specific content type
+            "Content-Type": "image/jpeg"
         }
         
         try:
             logger.info("📤 Uploading image to HeyGen Talking Photo API...")
             
-            # Use the correct talking photo upload endpoint
             response = requests.post(
-                "https://upload.heygen.com/v1/talking_photo",  # Correct endpoint from search results
+                "https://upload.heygen.com/v1/talking_photo",
                 headers=headers,
-                data=file_content,  # Send raw binary data
+                data=file_content,
                 timeout=60
             )
             
@@ -284,16 +282,16 @@ class HeyGenAPI:
             if response.status_code == 200:
                 result = response.json()
                 
-                # Check for successful response
-                if result.get('code') == 100 or not result.get('error'):
+                # CRITICAL FIX: Parse the correct response format
+                if result.get('code') == 100 and result.get('data'):
                     data = result.get('data', {})
-                    talking_photo_id = data.get('id') or data.get('talking_photo_id')
+                    talking_photo_id = data.get('talking_photo_id')
                     
                     if talking_photo_id:
                         logger.info(f"✅ Talking photo created successfully: {talking_photo_id}")
                         
                         return {
-                            "avatar_id": talking_photo_id,  # This is the talking_photo_id for video generation
+                            "avatar_id": talking_photo_id,
                             "status": "ready",
                             "type": "talking_photo",
                             "method": "talking_photo_upload"
@@ -312,20 +310,7 @@ class HeyGenAPI:
                 
         except Exception as e:
             logger.error(f"Talking photo creation failed: {str(e)}")
-            
-            # Fallback to pre-made avatar if talking photo creation fails
-            logger.info("Falling back to pre-made avatar selection")
-            fallback_result = HeyGenAPI.select_fallback_avatar()
-            
-            if fallback_result:
-                return {
-                    "avatar_id": fallback_result['avatar_id'],
-                    "status": "ready",
-                    "type": "pre_made",
-                    "method": "fallback_selection"
-                }
-            else:
-                raise Exception(f"All avatar creation methods failed: {str(e)}")
+            raise e  # Re-raise the exception instead of falling back
 
     @staticmethod
     def _create_avatar_group_from_asset(asset_id, asset_url):
@@ -878,33 +863,42 @@ def create_avatar(current_user):
         # Create talking photo avatar from uploaded image
         avatar_result = HeyGenAPI.create_photo_avatar(image_file)
         
-        # Update user record with avatar info
-        success = db.update_avatar_status(
-            current_user['id'],
-            {
-                'heygen_avatar_id': avatar_result['avatar_id'],
-                'avatar_training_status': avatar_result['status'],
-                'avatar_type': avatar_result['type']
-            }
-        )
-        
-        if success:
-            logger.info(f"✅ Avatar created successfully: {avatar_result['avatar_id']}")
+        # CRITICAL FIX: Extract talking_photo_id correctly
+        if avatar_result and avatar_result.get('avatar_id'):
+            avatar_id = avatar_result['avatar_id']
             
-            return jsonify({
-                'status': 'success',
-                'message': 'Custom avatar created from your photo!',
-                'data': {
-                    'avatar_id': avatar_result['avatar_id'],
-                    'status': avatar_result['status'],
-                    'type': avatar_result['type'],
-                    'is_custom': avatar_result['type'] == 'talking_photo'
+            # Update user record with avatar info
+            success = db.update_avatar_status(
+                current_user['id'],
+                {
+                    'heygen_avatar_id': avatar_id,
+                    'avatar_training_status': avatar_result.get('status', 'ready'),
+                    'avatar_type': avatar_result.get('type', 'talking_photo')
                 }
-            })
+            )
+            
+            if success:
+                logger.info(f"✅ Avatar created successfully: {avatar_id}")
+                
+                return jsonify({
+                    'status': 'success',
+                    'message': 'Custom avatar created from your photo!',
+                    'data': {
+                        'avatar_id': avatar_id,
+                        'status': avatar_result.get('status', 'ready'),
+                        'type': avatar_result.get('type', 'talking_photo'),
+                        'is_custom': avatar_result.get('type') == 'talking_photo'
+                    }
+                })
+            else:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Failed to save avatar to database'
+                }), 500
         else:
             return jsonify({
                 'status': 'error',
-                'message': 'Failed to save avatar to database'
+                'message': 'Failed to create avatar - no avatar ID returned'
             }), 500
             
     except Exception as e:
@@ -990,7 +984,7 @@ def get_avatar_status(current_user, avatar_id):
 @app.route('/api/voice/save', methods=['POST'])
 @token_required
 def save_voice_preference(current_user):
-    """Save user's selected voice preference - ENHANCED VERSION"""
+    """FIXED: Save user's selected voice preference with proper persistence"""
     try:
         data = request.get_json()
         voice_id = data.get('voice_id')
@@ -1003,7 +997,7 @@ def save_voice_preference(current_user):
         
         logger.info(f"Saving voice preference for user {current_user['username']}: {voice_id}")
         
-        # Update user's voice preference in database
+        # CRITICAL FIX: Update user's voice preference in database
         success = db.update_influencer(current_user['id'], {
             'preferred_voice_id': voice_id,
             'voice_updated_at': datetime.now(timezone.utc).isoformat()
@@ -1012,13 +1006,15 @@ def save_voice_preference(current_user):
         if success:
             logger.info(f"Voice preference saved successfully: {voice_id}")
             
-            # ENHANCED: Also update the chatbot's voice preference if applicable
-            if hasattr(chatbot, 'update_user_voice_preference'):
-                chatbot.update_user_voice_preference(current_user['id'], voice_id)
+            # CRITICAL FIX: Also update the current user session data
+            updated_user = db.get_influencer(current_user['id'])
+            if updated_user:
+                # Update the user data that gets returned by token_required
+                current_user['preferred_voice_id'] = voice_id
             
             return jsonify({
                 'status': 'success',
-                'message': 'Voice preference saved',
+                'message': 'Voice preference saved successfully',
                 'data': {
                     'voice_id': voice_id,
                     'voice_name': get_voice_name_by_id(voice_id),
@@ -1041,7 +1037,7 @@ def save_voice_preference(current_user):
 # Chat Routes
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    """Handle chat messages and generate responses with user's preferred voice - ENHANCED VERSION"""
+    """FIXED: Handle chat messages and generate responses with proper voice persistence"""
     try:
         data = request.get_json()
         
@@ -1065,8 +1061,13 @@ def chat():
                 'message': 'Influencer not found'
             }), 404
         
-        # Get user's preferred voice
-        preferred_voice_id = influencer.get('preferred_voice_id', '2d5b0e6cf36f460aa7fc47e3eee4ba54')
+        # CRITICAL FIX: Get user's preferred voice with proper fallback
+        preferred_voice_id = influencer.get('preferred_voice_id') 
+        if not preferred_voice_id:
+            # Try alternative field names that might be used
+            preferred_voice_id = (influencer.get('voice_id') or 
+                                influencer.get('default_voice_id') or 
+                                '2d5b0e6cf36f460aa7fc47e3eee4ba54')  # Default fallback
         
         logger.info(f"Using voice ID: {preferred_voice_id} for {influencer_username}")
         
@@ -1078,7 +1079,7 @@ def chat():
                 session_id=session_id,
                 influencer_name=influencer['username'],
                 voice_mode=True,
-                voice_id=preferred_voice_id
+                voice_id=preferred_voice_id  # CRITICAL: Pass the voice ID
             )
         except Exception as bot_error:
             logger.error(f"Chatbot error: {bot_error}")
@@ -1112,7 +1113,7 @@ def chat():
                 'session_id': session_id,
                 'voice_id': preferred_voice_id,
                 'voice_name': voice_name,
-                'using_custom_voice': bool(preferred_voice_id)
+                'using_custom_voice': bool(preferred_voice_id and preferred_voice_id != '2d5b0e6cf36f460aa7fc47e3eee4ba54')
             }
         })
         
@@ -1122,7 +1123,6 @@ def chat():
             'status': 'error',
             'message': 'Chat service temporarily unavailable'
         }), 500
-
 
 @app.route('/api/chat/<username>', methods=['GET'])
 def get_chat_info(username):
@@ -1166,20 +1166,469 @@ def get_chat_info(username):
             'message': 'Failed to get chat information'
         }), 500
 
+# FIXED EMBED GENERATE ENDPOINT for main.py
+
+@app.route('/api/embed/generate', methods=['POST'])
+@token_required
+def generate_embed_code(current_user):
+    """FIXED: Generate embed code for chatbot widget with proper URL generation"""
+    try:
+        data = request.get_json()
+        
+        # Get configuration with defaults
+        config = {
+            'width': data.get('width', '400px'),
+            'height': data.get('height', '600px'),
+            'position': data.get('position', 'bottom-right'),
+            'theme': data.get('theme', 'default'),
+            'trigger_text': data.get('trigger_text', 'Chat with me!'),
+            'auto_open': data.get('auto_open', False),
+            'custom_css': data.get('custom_css', '')
+        }
+        
+        # CRITICAL FIX: Generate proper URLs
+        base_url = request.url_root.rstrip('/')  # Remove trailing slash
+        username = current_user['username']
+        
+        # Generate chat URL with proper encoding
+        chat_url = f"{base_url}/chat.html?username={username}"
+        
+        # Generate widget ID
+        widget_id = f"ac-widget-{int(datetime.now().timestamp())}"
+        
+        # Parse position for CSS
+        position_parts = config['position'].split('-')
+        v_pos = position_parts[0] if len(position_parts) > 0 else 'bottom'
+        h_pos = position_parts[1] if len(position_parts) > 1 else 'right'
+        
+        # Generate position CSS
+        position_css = ""
+        if v_pos == 'top':
+            position_css += "top: 20px; "
+        else:
+            position_css += "bottom: 20px; "
+            
+        if h_pos == 'left':
+            position_css += "left: 20px; "
+        else:
+            position_css += "right: 20px; "
+        
+        # FIXED: Generate complete embed code
+        embed_code = f"""<!-- AvatarCommerce Chatbot Widget -->
+<div id="{widget_id}" class="ac-chatbot-widget" style="
+    position: fixed;
+    {position_css}
+    z-index: 9999;
+    width: {config['width']};
+    height: {config['height']};
+    {'' if config['auto_open'] else 'display: none;'}
+">
+    <!-- Trigger Button -->
+    <button id="{widget_id}-trigger" class="ac-widget-trigger" style="
+        position: absolute;
+        bottom: -50px;
+        right: 0;
+        background: linear-gradient(135deg, #5e60ce, #7c3aed);
+        color: white;
+        border: none;
+        padding: 12px 20px;
+        border-radius: 25px;
+        cursor: pointer;
+        font-weight: 600;
+        box-shadow: 0 4px 12px rgba(94, 96, 206, 0.3);
+        transition: all 0.3s ease;
+        {'' if not config['auto_open'] else 'display: none;'}
+    " onclick="toggleWidget{widget_id}()">
+        {config['trigger_text']}
+    </button>
+    
+    <!-- Chat Widget -->
+    <div class="ac-widget-container" style="
+        width: 100%;
+        height: 100%;
+        border-radius: 15px;
+        overflow: hidden;
+        box-shadow: 0 8px 40px rgba(0,0,0,0.15);
+        background: white;
+        position: relative;
+    ">
+        <!-- Close Button -->
+        <button onclick="closeWidget{widget_id}()" style="
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255,255,255,0.9);
+            border: none;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            cursor: pointer;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            color: #666;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        ">×</button>
+        
+        <!-- Chat Frame -->
+        <iframe 
+            src="{chat_url}&embed=true"
+            width="100%"
+            height="100%"
+            frameborder="0"
+            allow="microphone; camera"
+            style="border: none;"
+            title="AI Chat Assistant">
+        </iframe>
+    </div>
+</div>
+
+<script>
+// Widget control functions
+function toggleWidget{widget_id}() {{
+    var widget = document.getElementById('{widget_id}');
+    var trigger = document.getElementById('{widget_id}-trigger');
+    if (widget && trigger) {{
+        widget.style.display = 'block';
+        trigger.style.display = 'none';
+    }}
+}}
+
+function closeWidget{widget_id}() {{
+    var widget = document.getElementById('{widget_id}');
+    var trigger = document.getElementById('{widget_id}-trigger');
+    if (widget && trigger) {{
+        widget.style.display = 'none';
+        trigger.style.display = 'block';
+    }}
+}}
+
+// Auto-open functionality
+{f'''
+setTimeout(function() {{
+    toggleWidget{widget_id}();
+}}, 3000);
+''' if config['auto_open'] else ''}
+
+// Add hover effects and animations
+document.addEventListener('DOMContentLoaded', function() {{
+    var trigger = document.getElementById('{widget_id}-trigger');
+    if (trigger) {{
+        trigger.addEventListener('mouseenter', function() {{
+            this.style.transform = 'translateY(-2px) scale(1.05)';
+            this.style.boxShadow = '0 6px 20px rgba(94, 96, 206, 0.4)';
+        }});
+        trigger.addEventListener('mouseleave', function() {{
+            this.style.transform = 'translateY(0) scale(1)';
+            this.style.boxShadow = '0 4px 12px rgba(94, 96, 206, 0.3)';
+        }});
+    }}
+    
+    // Add pulse animation to trigger
+    var style = document.createElement('style');
+    style.textContent = `
+        @keyframes ac-pulse {{
+            0% {{ box-shadow: 0 4px 12px rgba(94, 96, 206, 0.3); }}
+            50% {{ box-shadow: 0 4px 20px rgba(94, 96, 206, 0.5); }}
+            100% {{ box-shadow: 0 4px 12px rgba(94, 96, 206, 0.3); }}
+        }}
+        .ac-widget-trigger {{
+            animation: ac-pulse 2s infinite;
+        }}
+    `;
+    document.head.appendChild(style);
+}});
+</script>
+
+{f'<style>{config["custom_css"]}</style>' if config.get('custom_css') else ''}
+<!-- End AvatarCommerce Widget -->"""
+
+        # Generate preview and direct URLs
+        preview_url = f"{base_url}/embed-preview.html?username={username}"
+        direct_chat_url = chat_url
+        
+        # Save configuration to database (optional)
+        try:
+            if hasattr(db, 'save_embed_configuration'):
+                db.save_embed_configuration(current_user['id'], config)
+        except Exception as e:
+            logger.warning(f"Could not save embed config: {e}")
+        
+        logger.info(f"Generated embed code for {username}")
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Embed code generated successfully',
+            'data': {
+                'embed_code': embed_code,
+                'preview_url': preview_url,
+                'chat_url': direct_chat_url,
+                'widget_id': widget_id,
+                'config': config
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Generate embed error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to generate embed code: {str(e)}'
+        }), 500
+
+
+@app.route('/api/embed/preview/<username>', methods=['GET'])
+def embed_preview(username):
+    """Generate embed preview page"""
+    try:
+        # Validate username
+        influencer = db.get_influencer_by_username(username)
+        if not influencer:
+            return jsonify({
+                'status': 'error',
+                'message': 'Influencer not found'
+            }), 404
+        
+        # Generate base URL
+        base_url = request.url_root.rstrip('/')
+        chat_url = f"{base_url}/chat.html?username={username}&embed=true"
+        
+        # Generate sample embed configuration
+        sample_config = {
+            'width': '400px',
+            'height': '600px',
+            'position': 'bottom-right',
+            'theme': 'default',
+            'trigger_text': f'Chat with {username}!',
+            'auto_open': False,
+            'custom_css': ''
+        }
+        
+        # Generate preview HTML
+        preview_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Embed Preview - {username}</title>
+    <style>
+        body {{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: white;
+        }}
+        .preview-container {{
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+        }}
+        .preview-header {{
+            margin-bottom: 40px;
+        }}
+        .preview-title {{
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }}
+        .preview-subtitle {{
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }}
+        .demo-content {{
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            margin-bottom: 40px;
+        }}
+        .demo-text {{
+            font-size: 1.1rem;
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }}
+        .footer {{
+            text-align: center;
+            opacity: 0.8;
+            font-size: 0.9rem;
+        }}
+    </style>
+</head>
+<body>
+    <div class="preview-container">
+        <div class="preview-header">
+            <h1 class="preview-title">Embed Preview</h1>
+            <p class="preview-subtitle">This is how the chat widget will appear on your website</p>
+        </div>
+        
+        <div class="demo-content">
+            <p class="demo-text">
+                This is a sample webpage showing how the chatbot widget integrates seamlessly into any website. 
+                The widget appears in the bottom-right corner and allows visitors to chat with {username}'s AI avatar.
+            </p>
+            <p class="demo-text">
+                Visitors can click the chat button to open an interactive conversation with the AI avatar, 
+                which can provide personalized recommendations and answer questions.
+            </p>
+        </div>
+        
+        <div class="footer">
+            <p>Powered by AvatarCommerce | This is a preview of the embedded chat widget</p>
+        </div>
+    </div>
+    
+    <!-- Embedded Chat Widget -->
+    <div id="ac-widget-preview" class="ac-chatbot-widget" style="
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 9999;
+        width: 400px;
+        height: 600px;
+        display: none;
+    ">
+        <button id="ac-widget-trigger" class="ac-widget-trigger" style="
+            position: absolute;
+            bottom: -50px;
+            right: 0;
+            background: linear-gradient(135deg, #5e60ce, #7c3aed);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: 600;
+            box-shadow: 0 4px 12px rgba(94, 96, 206, 0.3);
+            transition: all 0.3s ease;
+        " onclick="togglePreviewWidget()">
+            {sample_config['trigger_text']}
+        </button>
+        
+        <div class="ac-widget-container" style="
+            width: 100%;
+            height: 100%;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 8px 40px rgba(0,0,0,0.15);
+            background: white;
+            position: relative;
+        ">
+            <button onclick="closePreviewWidget()" style="
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                background: rgba(255,255,255,0.9);
+                border: none;
+                width: 30px;
+                height: 30px;
+                border-radius: 50%;
+                cursor: pointer;
+                z-index: 10;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 16px;
+                color: #666;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            ">×</button>
+            
+            <iframe 
+                src="{chat_url}"
+                width="100%"
+                height="100%"
+                frameborder="0"
+                allow="microphone; camera"
+                style="border: none;"
+                title="AI Chat Assistant Preview">
+            </iframe>
+        </div>
+    </div>
+    
+    <script>
+        function togglePreviewWidget() {{
+            var widget = document.getElementById('ac-widget-preview');
+            var trigger = document.getElementById('ac-widget-trigger');
+            if (widget && trigger) {{
+                widget.style.display = 'block';
+                trigger.style.display = 'none';
+            }}
+        }}
+        
+        function closePreviewWidget() {{
+            var widget = document.getElementById('ac-widget-preview');
+            var trigger = document.getElementById('ac-widget-trigger');
+            if (widget && trigger) {{
+                widget.style.display = 'none';
+                trigger.style.display = 'block';
+            }}
+        }}
+        
+        // Show trigger button after page loads
+        document.addEventListener('DOMContentLoaded', function() {{
+            document.getElementById('ac-widget-trigger').style.display = 'block';
+            
+            // Add hover effects
+            var trigger = document.getElementById('ac-widget-trigger');
+            if (trigger) {{
+                trigger.addEventListener('mouseenter', function() {{
+                    this.style.transform = 'translateY(-2px) scale(1.05)';
+                    this.style.boxShadow = '0 6px 20px rgba(94, 96, 206, 0.4)';
+                }});
+                trigger.addEventListener('mouseleave', function() {{
+                    this.style.transform = 'translateY(0) scale(1)';
+                    this.style.boxShadow = '0 4px 12px rgba(94, 96, 206, 0.3)';
+                }});
+            }}
+        }});
+    </script>
+</body>
+</html>"""
+        
+        # Return HTML response
+        response = make_response(preview_html)
+        response.headers['Content-Type'] = 'text/html'
+        return response
+        
+    except Exception as e:
+        logger.error(f"Embed preview error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to generate preview'
+        }), 500
+
 # Helper function to get voice name by ID
 def get_voice_name_by_id(voice_id):
-    """Get voice name by voice ID"""
+    """Get voice name by voice ID - updated for real voices"""
+    # Try to get from HeyGen API first
+    try:
+        headers = {
+            "X-Api-Key": Config.HEYGEN_API_KEY,
+            "Accept": "application/json"
+        }
+        
+        response = requests.get(
+            "https://api.heygen.com/v1/voice/list",
+            headers=headers,
+            timeout=5
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            voices = result.get('data', {}).get('voices', [])
+            
+            for voice in voices:
+                if voice.get('voice_id') == voice_id:
+                    return voice.get('display_name', voice.get('name', 'Unknown Voice'))
+    except:
+        pass
+    
+    # Fallback to known working voices
     voice_map = {
-        "2d5b0e6cf36f460aa7fc47e3eee4ba54": "Sarah (Professional)",
+        "2d5b0e6cf36f460aa7fc47e3eee4ba54": "Rachel (Professional)",
         "d7bbcdd6964c47bdaae26decade4a933": "David (Professional)",
-        "4d2b8e6cf36f460aa7fc47e3eee4ba12": "Emma (Friendly)",
-        "3a1c7d5bf24e350bb6dc46e2dee3ab21": "Michael (Casual)",
-        "1bd001e7e50f421d891986aad5158bc8": "Olivia (Warm)",
-        "26b2064088674c80b1e5fc5ab1a068ec": "James (Confident)",
-        "5c8e6a2b1f3d45e7a9c4b8d6f2e1a9c8": "Luna (Energetic)",
-        "7f9d2c4e6b8a1d5f3e9c7a2b4f6d8e1a": "Alexander (Sophisticated)",
-        "9a5e3f7b2d8c4a6e1f9b5d3a7c2f8e4b": "Sophia (Gentle)",
-        "2c8f4a6e1b7d3f9c5a8e2b4f6d1a9c7e": "Marcus (Dynamic)"
     }
     return voice_map.get(voice_id, "Default Voice")
 
@@ -1288,23 +1737,34 @@ def get_dashboard_analytics(current_user):
 @app.route('/api/influencer/profile', methods=['GET'])
 @token_required
 def get_profile(current_user):
-    """Get influencer profile with voice information"""
+    """FIXED: Get influencer profile with complete voice information"""
     try:
-        # Get current voice preference
-        preferred_voice_id = current_user.get('preferred_voice_id', '2d5b0e6cf36f460aa7fc47e3eee4ba54')
+        # CRITICAL FIX: Get fresh data from database
+        fresh_user_data = db.get_influencer(current_user['id'])
+        
+        if not fresh_user_data:
+            return jsonify({
+                'status': 'error',
+                'message': 'User not found'
+            }), 404
+        
+        # Get current voice preference with proper fallback
+        preferred_voice_id = (fresh_user_data.get('preferred_voice_id') or 
+                            fresh_user_data.get('voice_id') or
+                            '2d5b0e6cf36f460aa7fc47e3eee4ba54')
         
         return jsonify({
             'status': 'success',
             'data': {
-                'id': current_user['id'],
-                'username': current_user['username'],
-                'email': current_user['email'],
-                'bio': current_user.get('bio', ''),
-                'avatar_id': current_user.get('heygen_avatar_id'),
-                'voice_id': current_user.get('voice_id'),
+                'id': fresh_user_data['id'],
+                'username': fresh_user_data['username'],
+                'email': fresh_user_data['email'],
+                'bio': fresh_user_data.get('bio', ''),
+                'avatar_id': fresh_user_data.get('heygen_avatar_id'),
+                'voice_id': fresh_user_data.get('voice_id'),
                 'preferred_voice_id': preferred_voice_id,
                 'voice_name': get_voice_name_by_id(preferred_voice_id),
-                'created_at': current_user.get('created_at')
+                'created_at': fresh_user_data.get('created_at')
             }
         })
     except Exception as e:
@@ -1351,13 +1811,64 @@ def update_profile(current_user):
 # Voice Management Routes
 @app.route('/api/avatar/list-voices', methods=['GET'])
 def list_voices():
-    """Get available voices for avatar - ENHANCED VERSION WITH 10 VOICES"""
+    """Get available voices from HeyGen API with 10 voice options"""
     try:
-        # Extended voice list with 10 professional options
-        extended_voices = [
+        headers = {
+            "X-Api-Key": Config.HEYGEN_API_KEY,
+            "Accept": "application/json"
+        }
+        
+        # Try multiple endpoints to get voices
+        voice_endpoints = [
+            "https://api.heygen.com/v1/voice/list",
+            "https://api.heygen.com/v2/voices",
+            "https://api.heygen.com/v1/voices"
+        ]
+        
+        for endpoint in voice_endpoints:
+            try:
+                response = requests.get(endpoint, headers=headers, timeout=10)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    voices_data = result.get('data', {})
+                    
+                    # Try different response structures
+                    voices = (voices_data.get('voices') or 
+                             voices_data.get('list') or 
+                             result.get('voices', []))
+                    
+                    if voices and len(voices) > 0:
+                        # Format voice data and get up to 10
+                        formatted_voices = []
+                        for voice in voices[:20]:  # Get more to filter
+                            voice_id = voice.get("voice_id")
+                            if voice_id and len(formatted_voices) < 10:
+                                formatted_voices.append({
+                                    "voice_id": voice_id,
+                                    "name": voice.get("display_name", voice.get("name", f"Voice {len(formatted_voices)+1}")),
+                                    "gender": voice.get("gender", "Unknown"),
+                                    "language": voice.get("language", "English"),
+                                    "style": voice.get("style", "Professional"),
+                                    "preview_url": voice.get("preview_audio")
+                                })
+                        
+                        if len(formatted_voices) >= 2:
+                            return jsonify({
+                                'status': 'success',
+                                'data': {
+                                    'voices': formatted_voices,
+                                    'total_available': len(formatted_voices)
+                                }
+                            })
+            except:
+                continue
+        
+        # Enhanced fallback with more working voices
+        fallback_voices = [
             {
                 "voice_id": "2d5b0e6cf36f460aa7fc47e3eee4ba54",
-                "name": "Sarah (Professional)",
+                "name": "Rachel (Professional)",
                 "gender": "Female",
                 "language": "English",
                 "style": "Professional",
@@ -1372,67 +1883,67 @@ def list_voices():
                 "preview_url": None
             },
             {
-                "voice_id": "4d2b8e6cf36f460aa7fc47e3eee4ba12",
-                "name": "Emma (Friendly)",
-                "gender": "Female", 
-                "language": "English",
-                "style": "Friendly",
-                "preview_url": None
-            },
-            {
-                "voice_id": "3a1c7d5bf24e350bb6dc46e2dee3ab21",
-                "name": "Michael (Casual)",
-                "gender": "Male",
-                "language": "English", 
-                "style": "Casual",
-                "preview_url": None
-            },
-            {
-                "voice_id": "1bd001e7e50f421d891986aad5158bc8",
-                "name": "Olivia (Warm)",
+                "voice_id": "21m00Tcm4TlvDq8ikWAM",
+                "name": "Rachel (Calm)",
                 "gender": "Female",
                 "language": "English",
-                "style": "Warm",
+                "style": "Calm",
                 "preview_url": None
             },
             {
-                "voice_id": "26b2064088674c80b1e5fc5ab1a068ec",
-                "name": "James (Confident)",
-                "gender": "Male", 
-                "language": "English",
-                "style": "Confident",
-                "preview_url": None
-            },
-            {
-                "voice_id": "5c8e6a2b1f3d45e7a9c4b8d6f2e1a9c8",
-                "name": "Luna (Energetic)",
+                "voice_id": "AZnzlk1XvdvUeBnXmlld",
+                "name": "Domi (Strong)",
                 "gender": "Female",
                 "language": "English",
-                "style": "Energetic",
+                "style": "Strong",
                 "preview_url": None
             },
             {
-                "voice_id": "7f9d2c4e6b8a1d5f3e9c7a2b4f6d8e1a",
-                "name": "Alexander (Sophisticated)",
-                "gender": "Male",
-                "language": "English",
-                "style": "Sophisticated",
-                "preview_url": None
-            },
-            {
-                "voice_id": "9a5e3f7b2d8c4a6e1f9b5d3a7c2f8e4b",
-                "name": "Sophia (Gentle)",
+                "voice_id": "EXAVITQu4vr4xnSDxMaL",
+                "name": "Bella (Narration)",
                 "gender": "Female",
                 "language": "English",
-                "style": "Gentle",
+                "style": "Narration",
                 "preview_url": None
             },
             {
-                "voice_id": "2c8f4a6e1b7d3f9c5a8e2b4f6d1a9c7e",
-                "name": "Marcus (Dynamic)",
+                "voice_id": "ErXwobaYiN019PkySvjV",
+                "name": "Antoni (Well-rounded)",
                 "gender": "Male",
                 "language": "English",
-                "style": "Dynamic",
+                "style": "Well-rounded",
+                "preview_url": None
+            },
+            {
+                "voice_id": "VR6AewLTigWG4xSOukaG",
+                "name": "Arnold (Crisp)",
+                "gender": "Male",
+                "language": "English",
+                "style": "Crisp",
+                "preview_url": None
+            },
+            {
+                "voice_id": "pNInz6obpgDQGcFmaJgB",
+                "name": "Adam (Deep)",
+                "gender": "Male",
+                "language": "English",
+                "style": "Deep",
+                "preview_url": None
+            },
+            {
+                "voice_id": "yoZ06aMxZJJ28mfd3POQ",
+                "name": "Sam (Raspy)",
+                "gender": "Male",
+                "language": "English",
+                "style": "Raspy",
+                "preview_url": None
+            },
+            {
+                "voice_id": "29vD33N1CtxCmqQRPOHJ",
+                "name": "Drew (Well-rounded)",
+                "gender": "Male",
+                "language": "English",
+                "style": "Well-rounded",
                 "preview_url": None
             }
         ]
@@ -1440,8 +1951,8 @@ def list_voices():
         return jsonify({
             'status': 'success',
             'data': {
-                'voices': extended_voices,
-                'total_available': len(extended_voices)
+                'voices': fallback_voices,
+                'total_available': len(fallback_voices)
             }
         })
         
@@ -1499,12 +2010,12 @@ def check_video_status(current_user, video_id):
 @app.route('/api/avatar/test-video', methods=['POST'])
 @token_required
 def test_avatar_video(current_user):
-    """Test avatar video generation with proper voice handling - ENHANCED VERSION"""
+    """FIXED: Test avatar video generation with proper voice handling and persistence"""
     try:
         data = request.get_json()
         avatar_id = data.get('avatar_id')
         text = data.get('text', 'Hello! This is a test message.')
-        voice_id = data.get('voice_id', '2d5b0e6cf36f460aa7fc47e3eee4ba54')
+        voice_id = data.get('voice_id')
         
         if not avatar_id:
             return jsonify({
@@ -1512,24 +2023,27 @@ def test_avatar_video(current_user):
                 'message': 'Avatar ID is required'
             }), 400
         
+        # CRITICAL FIX: If voice_id not provided, get from user's current preference
+        if not voice_id:
+            voice_id = current_user.get('preferred_voice_id', '2d5b0e6cf36f460aa7fc47e3eee4ba54')
+        
         logger.info(f"Testing avatar video for {current_user['username']} with avatar {avatar_id} and voice {voice_id}")
         
-        # CRITICAL FIX: Update user's voice preference immediately if changed
-        if voice_id != current_user.get('preferred_voice_id'):
+        # CRITICAL FIX: Update user's voice preference IMMEDIATELY if changed
+        current_voice = current_user.get('preferred_voice_id')
+        if voice_id != current_voice:
             db.update_influencer(current_user['id'], {
                 'preferred_voice_id': voice_id,
                 'voice_updated_at': datetime.now(timezone.utc).isoformat()
             })
             logger.info(f"Updated voice preference to: {voice_id}")
+            
+            # Update current_user object for this request
+            current_user['preferred_voice_id'] = voice_id
         
-        # Generate video using chatbot with explicit voice
+        # Generate video using chatbot with EXPLICIT voice parameter
         try:
-            # ENHANCED: Use chatbot method that accepts voice_id parameter
-            if hasattr(chatbot, 'generate_avatar_video_with_voice'):
-                video_result = chatbot.generate_avatar_video_with_voice(text, current_user['id'], voice_id)
-            else:
-                # Fallback to regular method
-                video_result = chatbot.generate_avatar_video(text, current_user['id'])
+            video_result = chatbot.generate_avatar_video_with_voice(text, current_user['id'], voice_id)
             
             if video_result:
                 logger.info(f"Test video generated successfully: {video_result}")

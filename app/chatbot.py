@@ -1,4 +1,4 @@
-# chatbot.py - Complete updated class
+# chatbot.py - FIXED VERSION with proper voice handling
 
 import requests
 import os
@@ -15,8 +15,6 @@ from config import (
     HEYGEN_API_KEY,
     ELEVEN_LABS_API_KEY
 )
-
-from config import AFFILIATE_PLATFORMS, get_enabled_platforms, is_platform_enabled
 
 from config import AFFILIATE_PLATFORMS, get_enabled_platforms, is_platform_enabled
 
@@ -45,8 +43,93 @@ class Chatbot:
         # Database
         self.db = db
 
-    def generate_avatar_video(self, text, influencer_id):
-        """Generate video using HeyGen API with proper avatar handling"""
+    def get_response(self, message, influencer_id, session_id=None, influencer_name=None, voice_mode=False, voice_id=None):
+        """Generate a response with optional product recommendations and voice."""
+        # Check if the message indicates product interest
+        is_product_query, product_query = self.analyze_message_for_product_intent(message)
+        
+        # Determine if we should promote a product based on conversation settings
+        should_promote = False
+        if session_id and self.db:
+            should_promote = self.should_promote_product(influencer_id, session_id)
+            
+        # Generate conversational response
+        chat_response = self.get_chat_response(message, influencer_id, session_id, influencer_name)
+        
+        # Handle product recommendations
+        full_response = chat_response
+        
+        # If explicit product interest is detected, use that query
+        if is_product_query:
+            product_recommendations = self.get_product_recommendations(product_query, influencer_id)
+            full_response = f"{chat_response}\n\n{product_recommendations}"
+            was_promotion = True
+        # Otherwise, if it's time to promote based on settings, use the default product
+        elif should_promote:
+            product_query = self.get_product_query_for_promotion(influencer_id)
+            if product_query:
+                product_recommendations = self.get_product_recommendations(product_query, influencer_id)
+                full_response = f"{chat_response}\n\n{product_recommendations}"
+                was_promotion = True
+            else:
+                was_promotion = False
+        else:
+            was_promotion = False
+        
+        # Update conversation counter if we have a session and db
+        if session_id and self.db:
+            self.db.increment_conversation_counter(influencer_id, session_id, was_promotion)
+        
+        # FIXED: Generate video avatar with proper voice handling
+        video_url = ""
+        if voice_id:
+            print(f"🎤 Using specified voice ID: {voice_id}")
+            video_url = self.generate_avatar_video_with_voice(chat_response, influencer_id, voice_id)
+        else:
+            # Get user's preferred voice from database
+            if self.db:
+                user_data = self.db.get_influencer(influencer_id)
+                preferred_voice = user_data.get('preferred_voice_id') if user_data else None
+                if preferred_voice:
+                    print(f"🎤 Using user's preferred voice: {preferred_voice}")
+                    video_url = self.generate_avatar_video_with_voice(chat_response, influencer_id, preferred_voice)
+                else:
+                    print("🎤 Using default voice for video generation")
+                    video_url = self.generate_avatar_video(chat_response, influencer_id)
+            else:
+                video_url = self.generate_avatar_video(chat_response, influencer_id)
+        
+        # Generate audio if voice mode is enabled
+        audio_url = None
+        if voice_mode:
+            try:
+                # Use the specified voice or user's preferred voice
+                audio_voice_id = voice_id
+                if not audio_voice_id and self.db:
+                    user_data = self.db.get_influencer(influencer_id)
+                    audio_voice_id = user_data.get('preferred_voice_id') if user_data else None
+                
+                if audio_voice_id:
+                    print(f"🔊 Generating audio with voice: {audio_voice_id}")
+                    audio_url = self.generate_voice_audio(chat_response, audio_voice_id)
+                else:
+                    print("🔊 Generating audio with default voice")
+                    audio_url = self.generate_voice_audio(chat_response)
+            except Exception as e:
+                print(f"Voice generation error: {str(e)}")
+                audio_url = None
+            
+        return {
+            "text": full_response,
+            "chat_response": chat_response,  # Just the conversational part
+            "video_url": video_url,
+            "audio_url": audio_url,
+            "has_product_recommendations": is_product_query or was_promotion,
+            "voice_mode": voice_mode
+        }
+
+    def generate_avatar_video_with_voice(self, text, influencer_id, voice_id):
+        """FIXED: Generate video using HeyGen API with specific voice - properly handling voice parameter"""
         
         if not self.heygen_api_key:
             print("❌ ERROR: HeyGen API key not configured")
@@ -66,9 +149,10 @@ class Chatbot:
         else:
             avatar_id = influencer_id  # Fallback
         
-        print(f"🎬 === AVATAR VIDEO GENERATION ===")
+        print(f"🎬 === AVATAR VIDEO GENERATION WITH VOICE ===")
         print(f"🎭 Influencer ID: {influencer_id}")
         print(f"🎭 Avatar ID: {avatar_id}")
+        print(f"🎤 Voice ID: {voice_id}")
         print(f"📝 Text length: {len(text)} characters")
         print(f"💬 Text: {text[:100]}..." if len(text) > 100 else f"💬 Text: {text}")
         
@@ -83,46 +167,31 @@ class Chatbot:
             text = text[:1197] + "..."
             print(f"✂️  Text truncated to {len(text)} characters")
         
-        # Detect avatar type and use appropriate generation method
+        # Detect avatar type and use appropriate generation method with voice
         avatar_type = self._detect_avatar_type(avatar_id)
         print(f"🔍 Detected avatar type: {avatar_type}")
         
         if avatar_type == "photo_avatar":
-            return self._generate_photo_avatar_video(text, avatar_id, headers)
+            return self._generate_photo_avatar_video_with_voice(text, avatar_id, voice_id, headers)
         else:
-            return self._generate_regular_avatar_video(text, avatar_id, headers)
-    
-    def _detect_avatar_type(self, avatar_id):
-        """Detect if avatar is a photo avatar or regular avatar"""
-        if not avatar_id:
-            return "unknown"
+            return self._generate_regular_avatar_video_with_voice(text, avatar_id, voice_id, headers)
+
+    def _generate_photo_avatar_video_with_voice(self, text, avatar_id, voice_id, headers):
+        """FIXED: Generate video using talking photo with specific voice"""
+        print(f"📸 Using talking photo generation method with voice: {voice_id}")
         
-        # Photo avatar groups are typically 32-character hex strings
-        if len(avatar_id) == 32 and all(c in '0123456789abcdefABCDEF-' for c in avatar_id):
-            return "photo_avatar"
-        
-        # Regular avatars often contain underscores and descriptive names
-        return "regular_avatar"
-    
-    def _generate_photo_avatar_video(self, text, avatar_id, headers):
-        """Generate video using talking photo (updated for correct API)"""
-        print("📸 Using talking photo generation method")
-        
-        # Get a working voice ID (use the voice selected by user)
-        voice_id = "2d5b0e6cf36f460aa7fc47e3eee4ba54"  # Default English voice
-        
-        # Create video payload for talking photo
+        # Create video payload for talking photo with specified voice
         payload = {
             "video_inputs": [
                 {
                     "character": {
-                        "type": "talking_photo",  # Correct type for uploaded photos
-                        "talking_photo_id": avatar_id  # Use the talking_photo_id from upload
+                        "type": "talking_photo",
+                        "talking_photo_id": avatar_id
                     },
                     "voice": {
                         "type": "text",
                         "input_text": text,
-                        "voice_id": voice_id
+                        "voice_id": voice_id  # CRITICAL: Use the specified voice
                     },
                     "background": {
                         "type": "color",
@@ -137,15 +206,12 @@ class Chatbot:
         }
         
         return self._submit_video_generation(payload, headers)
-    
-    def _generate_regular_avatar_video(self, text, avatar_id, headers):
-        """Generate video using regular avatar (pre-made avatar)"""
-        print("👤 Using regular avatar generation method")
+
+    def _generate_regular_avatar_video_with_voice(self, text, avatar_id, voice_id, headers):
+        """FIXED: Generate video using regular avatar with specific voice"""
+        print(f"👤 Using regular avatar generation method with voice: {voice_id}")
         
-        # Get a working voice ID
-        voice_id = "2d5b0e6cf36f460aa7fc47e3eee4ba54"  # Default English voice
-        
-        # Create video payload for regular avatar
+        # Create video payload for regular avatar with specified voice
         payload = {
             "video_inputs": [
                 {
@@ -157,7 +223,7 @@ class Chatbot:
                     "voice": {
                         "type": "text",
                         "input_text": text,
-                        "voice_id": voice_id
+                        "voice_id": voice_id  # CRITICAL: Use the specified voice
                     },
                     "background": {
                         "type": "color",
@@ -172,7 +238,42 @@ class Chatbot:
         }
         
         return self._submit_video_generation(payload, headers)
-    
+
+    def generate_avatar_video(self, text, influencer_id):
+        """Generate video using HeyGen API with user's preferred voice or default"""
+        
+        if not self.heygen_api_key:
+            print("❌ ERROR: HeyGen API key not configured")
+            return ""
+        
+        # Get user's preferred voice from database
+        preferred_voice_id = "2d5b0e6cf36f460aa7fc47e3eee4ba54"  # Default fallback
+        
+        if self.db:
+            influencer = self.db.get_influencer(influencer_id)
+            if influencer:
+                user_preferred_voice = influencer.get("preferred_voice_id")
+                if user_preferred_voice:
+                    preferred_voice_id = user_preferred_voice
+                    print(f"🎤 Using user's preferred voice: {preferred_voice_id}")
+                else:
+                    print(f"🎤 No preferred voice found, using default: {preferred_voice_id}")
+        
+        # Use the voice-specific generation method
+        return self.generate_avatar_video_with_voice(text, influencer_id, preferred_voice_id)
+
+    def _detect_avatar_type(self, avatar_id):
+        """Detect if avatar is a photo avatar or regular avatar"""
+        if not avatar_id:
+            return "unknown"
+        
+        # Photo avatar groups are typically 32-character hex strings
+        if len(avatar_id) == 32 and all(c in '0123456789abcdefABCDEF-' for c in avatar_id):
+            return "photo_avatar"
+        
+        # Regular avatars often contain underscores and descriptive names
+        return "regular_avatar"
+
     def _submit_video_generation(self, payload, headers):
         """Submit video generation request and poll for completion"""
         print(f"📤 Sending request to HeyGen...")
@@ -305,136 +406,42 @@ class Chatbot:
         
         print(f"⏰ Video generation timed out after {max_attempts} attempts")
         return ""
+
+    # [Rest of the class methods remain the same...]
+    # (Including product recommendations, voice generation, etc.)
     
-    def generate_avatar_video_with_voice(self, text, influencer_id, voice_id):
-        """Generate video using HeyGen API with specific voice"""
+    def get_chat_response(self, message, influencer_id=None, session_id=None, influencer_name=None):
+        """Generate a conversational response with context."""
+        context = ""
         
-        if not self.heygen_api_key:
-            print("❌ ERROR: HeyGen API key not configured")
-            return ""
-        
-        # Get the actual avatar ID from database
-        if self.db:
+        # Add influencer bio if available and relevant
+        if self.db and influencer_id:
             influencer = self.db.get_influencer(influencer_id)
-            if not influencer:
-                print(f"❌ ERROR: Influencer {influencer_id} not found")
-                return ""
-            
-            avatar_id = influencer.get("heygen_avatar_id")
-            if not avatar_id:
-                print(f"❌ ERROR: No avatar ID found for influencer {influencer_id}")
-                return ""
-        else:
-            avatar_id = influencer_id  # Fallback
+            if influencer and influencer.get("bio"):
+                context += f"Influencer Bio: {influencer['bio']}\n\n"
         
-        print(f"🎬 === AVATAR VIDEO GENERATION WITH CUSTOM VOICE ===")
-        print(f"🎭 Avatar ID: {avatar_id}")
-        print(f"🎤 Voice ID: {voice_id}")
-        print(f"📝 Text: {text[:100]}..." if len(text) > 100 else f"📝 Text: {text}")
+        # Add chat history for context if session_id is provided
+        if self.db and influencer_id and session_id:
+            chat_history = self.db.get_chat_history(influencer_id, session_id, limit=5)
+            if chat_history:
+                context += "Recent conversation history:\n"
+                # Reverse to get chronological order
+                for chat in reversed(chat_history):
+                    context += f"User: {chat['user_message']}\n"
+                    context += f"You: {chat['bot_response']}\n"
+                context += "\n"
         
-        headers = {
-            "X-Api-Key": self.heygen_api_key,
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }
+        prompt = f"""You are a friendly, helpful AI assistant for an influencer{' named ' + influencer_name if influencer_name else ''}. 
+        {context}
+        Respond to the following message in a conversational, engaging way:
         
-        # Ensure text isn't too long
-        if len(text) > 1200:
-            text = text[:1197] + "..."
+        User message: {message}
         
-        # Create video payload using talking photo with user's selected voice
-        payload = {
-            "video_inputs": [
-                {
-                    "character": {
-                        "type": "talking_photo",
-                        "talking_photo_id": avatar_id
-                    },
-                    "voice": {
-                        "type": "text",
-                        "input_text": text,
-                        "voice_id": voice_id  # Use the user's selected voice
-                    },
-                    "background": {
-                        "type": "color",
-                        "value": "#FFFFFF"
-                    }
-                }
-            ],
-            "dimension": {
-                "width": 720,
-                "height": 480
-            }
-        }
+        Keep your response concise (2-3 sentences max) and personable."""
         
-        return self._submit_video_generation(payload, headers)
-
-    def generate_avatar_video_with_voice(self, text, influencer_id, voice_id):
-        """Generate video using HeyGen API with specific voice"""
-        print(f"🎤 Using voice ID: {voice_id}")
-        return self.generate_avatar_video(text, influencer_id)
-
-    def check_avatar_ready_for_video(self, avatar_id):
-        """Check if avatar is ready for video generation"""
-        
-        if not self.heygen_api_key:
-            print("ERROR: HeyGen API key not configured")
-            return False
-        
-        headers = {
-            "X-Api-Key": self.heygen_api_key,
-            "Accept": "application/json"
-        }
-        
-        try:
-            avatar_type = self._detect_avatar_type(avatar_id)
-            print(f"Checking avatar readiness for {avatar_type}: {avatar_id}")
-            
-            if avatar_type == "photo_avatar":
-                # Check photo avatar status
-                response = requests.get(
-                    f"https://api.heygen.com/v2/photo_avatar/{avatar_id}",
-                    headers=headers,
-                    timeout=10
-                )
-                
-                print(f"Photo avatar status check: {response.status_code}")
-                
-                if response.status_code == 200:
-                    avatar_data = response.json()
-                    status = avatar_data.get("data", {}).get("status", "unknown")
-                    print(f"Photo avatar status: {status}")
-                    return status in ["completed", "ready"]
-                else:
-                    print(f"Photo avatar check failed: {response.text}")
-                    return False
-                    
-            else:
-                # For regular avatars, check if it exists in the avatars list
-                response = requests.get(
-                    "https://api.heygen.com/v2/avatars",
-                    headers=headers,
-                    timeout=10
-                )
-                
-                print(f"Regular avatars list check: {response.status_code}")
-                
-                if response.status_code == 200:
-                    avatars_data = response.json()
-                    avatars = avatars_data.get("data", {}).get("avatars", [])
-                    
-                    # Check if avatar_id exists in the list
-                    avatar_exists = any(avatar.get("avatar_id") == avatar_id for avatar in avatars)
-                    print(f"Regular avatar '{avatar_id}' exists: {avatar_exists}")
-                    
-                    return avatar_exists
-                else:
-                    print(f"Failed to get avatars list: {response.text}")
-                    return False
-        
-        except Exception as e:
-            print(f"Error checking avatar status: {str(e)}")
-            return False
+        # Use the LLM to generate response
+        response = self.llm.invoke(prompt)
+        return response.content if hasattr(response, 'content') else str(response)
 
     def get_chat_response(self, message, influencer_id=None, session_id=None, influencer_name=None):
         """Generate a conversational response with context."""
