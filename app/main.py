@@ -616,14 +616,25 @@ def internal_error(error):
 # Health Check
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """API health check endpoint"""
-    return jsonify({
-        'status': 'success',
-        'message': 'AvatarCommerce API is running',
-        'timestamp': datetime.now(timezone.utc).isoformat(),
-        'version': '2.0'
-    })
-
+    """Health check endpoint for connection testing"""
+    try:
+        # Test database connection
+        test_query = db.supabase.table('influencers').select('count').execute()
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'API is healthy',
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'database': 'connected'
+        })
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'API health check failed',
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'database': 'disconnected'
+        }), 500
 # Authentication Routes (with legacy endpoints for frontend compatibility)
 @app.route('/api/register', methods=['POST'])
 @app.route('/api/auth/register', methods=['POST'])
@@ -1037,91 +1048,136 @@ def save_voice_preference(current_user):
 # Chat Routes
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    """FIXED: Handle chat messages and generate responses with proper voice persistence"""
+    """Enhanced chat endpoint with knowledge base integration"""
     try:
         data = request.get_json()
-        
         user_message = data.get('message', '').strip()
-        influencer_username = data.get('influencer_username', '').strip()
-        session_id = data.get('session_id', str(uuid.uuid4()))
+        influencer_id = data.get('influencer_id')
+        username = data.get('username')
+        session_id = data.get('session_id')
+        voice_mode = data.get('voice_mode', False)
         
-        if not user_message or not influencer_username:
+        if not user_message:
             return jsonify({
                 'status': 'error',
-                'message': 'Message and influencer username are required'
+                'message': 'Message is required'
             }), 400
         
-        logger.info(f"Processing chat message for {influencer_username}: {user_message}")
+        # Get influencer info
+        influencer = None
+        if influencer_id:
+            influencer = db.get_influencer_by_id(influencer_id)
+        elif username:
+            influencer = db.get_influencer_by_username(username)
         
-        # Get influencer
-        influencer = db.get_influencer_by_username(influencer_username)
         if not influencer:
             return jsonify({
                 'status': 'error',
                 'message': 'Influencer not found'
             }), 404
         
-        # CRITICAL FIX: Get user's preferred voice with proper fallback
-        preferred_voice_id = influencer.get('preferred_voice_id') 
-        if not preferred_voice_id:
-            # Try alternative field names that might be used
-            preferred_voice_id = (influencer.get('voice_id') or 
-                                influencer.get('default_voice_id') or 
-                                '2d5b0e6cf36f460aa7fc47e3eee4ba54')  # Default fallback
+        influencer_id = influencer['id']
+        influencer_name = influencer.get('username', 'the influencer')
         
-        logger.info(f"Using voice ID: {preferred_voice_id} for {influencer_username}")
+        logger.info(f"💬 Chat request - User: {influencer_name}, Message: {user_message[:50]}...")
         
-        # Generate response with user's preferred voice
+        # Initialize chatbot
+        chatbot_instance = Chatbot()
+        
+        # Generate response using enhanced method with knowledge base
         try:
-            response = chatbot.get_response(
-                user_message,
-                influencer['id'],
+            # Use the new knowledge-enhanced response method
+            ai_response = chatbot_instance.get_chat_response_with_knowledge(
+                message=user_message,
+                influencer_id=influencer_id,
                 session_id=session_id,
-                influencer_name=influencer['username'],
-                voice_mode=True,
-                voice_id=preferred_voice_id  # CRITICAL: Pass the voice ID
+                influencer_name=influencer_name,
+                db=db  # Pass database instance for knowledge retrieval
             )
-        except Exception as bot_error:
-            logger.error(f"Chatbot error: {bot_error}")
-            return jsonify({
-                'status': 'error',
-                'message': 'Failed to generate response'
-            }), 500
+            
+            logger.info(f"🤖 Generated AI response: {ai_response[:100]}...")
+            
+        except Exception as ai_error:
+            logger.error(f"AI response generation failed: {ai_error}")
+            # Fallback to basic response
+            ai_response = chatbot_instance.get_fallback_response(user_message, influencer_name)
         
-        # Log interaction
+        # Generate video response if avatar is available
+        video_url = ""
+        if influencer.get('heygen_avatar_id') and not voice_mode:
+            try:
+                logger.info("🎬 Generating video response...")
+                
+                video_url = chatbot_instance.generate_video_response(
+                    text_response=ai_response,
+                    avatar_id=influencer['heygen_avatar_id'],
+                    voice_id=influencer.get('preferred_voice_id')
+                )
+                
+                if video_url:
+                    logger.info(f"✅ Video generated successfully: {video_url}")
+                else:
+                    logger.warning("⚠️ Video generation failed, proceeding with text only")
+                    
+            except Exception as video_error:
+                logger.error(f"Video generation error: {video_error}")
+                # Continue without video
+        
+        # Generate new session ID if not provided
+        if not session_id:
+            session_id = str(uuid.uuid4())
+        
+        # Store interaction in database for analytics
         try:
-            db.log_chat_interaction(
-                influencer['id'],
-                user_message,
-                response['text'],
-                response.get('has_product_recommendations', False),
-                session_id
-            )
-        except Exception as log_error:
-            logger.warning(f"Failed to log interaction: {log_error}")
+            interaction_data = {
+                'influencer_id': influencer_id,
+                'session_id': session_id,
+                'user_message': user_message,
+                'bot_response': ai_response,
+                'video_url': video_url,
+                'has_video': bool(video_url),
+                'knowledge_used': True,  # Since we're using the enhanced method
+                'created_at': datetime.now(timezone.utc).isoformat()
+            }
+            
+            db.store_chat_interaction(interaction_data)
+            logger.info("📊 Chat interaction stored successfully")
+            
+        except Exception as storage_error:
+            logger.error(f"Failed to store chat interaction: {storage_error}")
+            # Continue without storing
         
-        # Get voice name for response
-        voice_name = get_voice_name_by_id(preferred_voice_id)
+        # Prepare response
+        response_data = {
+            'text': ai_response,
+            'session_id': session_id,
+            'video_url': video_url,
+            'has_avatar': bool(influencer.get('heygen_avatar_id')),
+            'knowledge_enhanced': True
+        }
+        
+        # Add voice response if in voice mode
+        if voice_mode and influencer.get('preferred_voice_id'):
+            try:
+                # You can add voice generation here if needed
+                # voice_url = generate_voice_response(ai_response, influencer['preferred_voice_id'])
+                # response_data['voice_url'] = voice_url
+                pass
+            except Exception as voice_error:
+                logger.error(f"Voice generation error: {voice_error}")
+        
+        logger.info(f"✅ Chat response completed for {influencer_name}")
         
         return jsonify({
             'status': 'success',
-            'data': {
-                'text': response['text'],
-                'video_url': response.get('video_url', ''),
-                'audio_url': response.get('audio_url', ''),
-                'has_product_recommendations': response.get('has_product_recommendations', False),
-                'session_id': session_id,
-                'voice_id': preferred_voice_id,
-                'voice_name': voice_name,
-                'using_custom_voice': bool(preferred_voice_id and preferred_voice_id != '2d5b0e6cf36f460aa7fc47e3eee4ba54')
-            }
+            'data': response_data
         })
         
     except Exception as e:
-        logger.error(f"Chat error: {e}")
+        logger.error(f"Chat endpoint error: {e}")
         return jsonify({
             'status': 'error',
-            'message': 'Chat service temporarily unavailable'
+            'message': 'Failed to process chat request'
         }), 500
 
 @app.route('/api/chat/<username>', methods=['GET'])
@@ -2198,6 +2254,372 @@ def test_heygen_simple(current_user):
             'message': f'API test failed: {str(e)}',
             'data': {'api_working': False}
         }), 500
+
+# Knowledge Management Endpoints
+
+@app.route('/api/knowledge/personal', methods=['GET'])
+@token_required
+def get_personal_knowledge(current_user):
+    """Get user's personal information for knowledge base"""
+    try:
+        personal_info = db.get_personal_knowledge(current_user['id'])
+        
+        return jsonify({
+            'status': 'success',
+            'data': personal_info
+        })
+        
+    except Exception as e:
+        logger.error(f"Get personal knowledge error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to get personal information'
+        }), 500
+
+@app.route('/api/knowledge/personal', methods=['POST'])
+@token_required
+def save_personal_knowledge(current_user):
+    """Save user's personal information for knowledge base"""
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        if not data.get('bio'):
+            return jsonify({
+                'status': 'error',
+                'message': 'Bio is required'
+            }), 400
+        
+        # Prepare personal knowledge data
+        personal_data = {
+            'user_id': current_user['id'],
+            'bio': data.get('bio', ''),
+            'industry': data.get('industry', ''),
+            'location': data.get('location', ''),
+            'expertise': data.get('expertise', ''),
+            'values': data.get('values', ''),
+            'communication_style': data.get('communication_style', ''),
+            'updated_at': datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Save to database
+        success = db.save_personal_knowledge(current_user['id'], personal_data)
+        
+        if success:
+            logger.info(f"Personal knowledge saved for user {current_user['username']}")
+            return jsonify({
+                'status': 'success',
+                'message': 'Personal information saved successfully'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to save personal information'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Save personal knowledge error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to save personal information'
+        }), 500
+
+@app.route('/api/knowledge/documents', methods=['GET'])
+@token_required
+def get_knowledge_documents(current_user):
+    """Get list of uploaded knowledge documents"""
+    try:
+        documents = db.get_knowledge_documents(current_user['id'])
+        
+        return jsonify({
+            'status': 'success',
+            'data': documents
+        })
+        
+    except Exception as e:
+        logger.error(f"Get documents error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to get documents'
+        }), 500
+
+@app.route('/api/knowledge/documents/upload', methods=['POST'])
+@token_required
+def upload_knowledge_document(current_user):
+    """Upload and process knowledge documents"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({
+                'status': 'error',
+                'message': 'No file provided'
+            }), 400
+        
+        file = request.files['file']
+        
+        if file.filename == '':
+            return jsonify({
+                'status': 'error',
+                'message': 'No file selected'
+            }), 400
+        
+        # Validate file type and size
+        allowed_extensions = {'.pdf', '.doc', '.docx', '.txt'}
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        
+        if file_ext not in allowed_extensions:
+            return jsonify({
+                'status': 'error',
+                'message': 'Unsupported file type'
+            }), 400
+        
+        # Check file size (10MB limit)
+        file.seek(0, os.SEEK_END)
+        file_size = file.tell()
+        file.seek(0)
+        
+        if file_size > 10 * 1024 * 1024:  # 10MB
+            return jsonify({
+                'status': 'error',
+                'message': 'File too large (max 10MB)'
+            }), 400
+        
+        # Generate unique filename
+        document_id = str(uuid.uuid4())
+        filename = secure_filename(file.filename)
+        safe_filename = f"{document_id}_{filename}"
+        
+        # Save file temporarily for processing
+        temp_path = os.path.join('temp', safe_filename)
+        os.makedirs('temp', exist_ok=True)
+        file.save(temp_path)
+        
+        try:
+            # Extract text from document
+            text_content = extract_text_from_file(temp_path, file_ext)
+            
+            if not text_content.strip():
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Could not extract text from document'
+                }), 400
+            
+            # Upload file to storage
+            storage_path = f"knowledge/{current_user['id']}/{safe_filename}"
+            
+            with open(temp_path, 'rb') as f:
+                upload_response = supabase.storage.from_("knowledge-documents").upload(
+                    storage_path, 
+                    f.read(),
+                    file_options={"content-type": get_content_type(file_ext)}
+                )
+            
+            # Get public URL
+            file_url = supabase.storage.from_("knowledge-documents").get_public_url(storage_path)
+            
+            # Process text for embeddings
+            chunks = chunk_text(text_content)
+            embeddings = generate_embeddings(chunks)
+            
+            # Save document metadata and chunks to database
+            document_data = {
+                'id': document_id,
+                'user_id': current_user['id'],
+                'filename': filename,
+                'file_path': storage_path,
+                'file_url': file_url,
+                'file_type': file_ext,
+                'file_size': file_size,
+                'text_content': text_content,
+                'chunks': chunks,
+                'embeddings': embeddings,
+                'uploaded_at': datetime.now(timezone.utc).isoformat()
+            }
+            
+            success = db.save_knowledge_document(document_data)
+            
+            if success:
+                logger.info(f"Document uploaded: {filename} for user {current_user['username']}")
+                return jsonify({
+                    'status': 'success',
+                    'message': 'Document uploaded and processed successfully',
+                    'data': {
+                        'id': document_id,
+                        'name': filename,
+                        'size': file_size,
+                        'chunks': len(chunks)
+                    }
+                })
+            else:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Failed to save document metadata'
+                }), 500
+                
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+                
+    except Exception as e:
+        logger.error(f"Document upload error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to upload document'
+        }), 500
+
+@app.route('/api/knowledge/documents/<document_id>', methods=['DELETE'])
+@token_required
+def delete_knowledge_document(current_user, document_id):
+    """Delete a knowledge document"""
+    try:
+        # Get document info
+        document = db.get_knowledge_document(current_user['id'], document_id)
+        
+        if not document:
+            return jsonify({
+                'status': 'error',
+                'message': 'Document not found'
+            }), 404
+        
+        # Delete from storage
+        try:
+            supabase.storage.from_("knowledge-documents").remove([document['file_path']])
+        except Exception as storage_error:
+            logger.warning(f"Storage deletion failed: {storage_error}")
+        
+        # Delete from database
+        success = db.delete_knowledge_document(current_user['id'], document_id)
+        
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': 'Document deleted successfully'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to delete document'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Delete document error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to delete document'
+        }), 500
+
+@app.route('/api/knowledge/search', methods=['POST'])
+@token_required
+def search_knowledge(current_user):
+    """Search user's knowledge base using semantic similarity"""
+    try:
+        data = request.get_json()
+        query = data.get('query', '').strip()
+        
+        if not query:
+            return jsonify({
+                'status': 'error',
+                'message': 'Query is required'
+            }), 400
+        
+        # Generate embedding for query
+        query_embedding = generate_embeddings([query])[0]
+        
+        # Search in knowledge base
+        results = db.search_knowledge_base(
+            current_user['id'], 
+            query_embedding, 
+            limit=data.get('limit', 5)
+        )
+        
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'query': query,
+                'results': results
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Knowledge search error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to search knowledge base'
+        }), 500
+
+# Helper Functions
+
+def extract_text_from_file(file_path, file_ext):
+    """Extract text content from various file types"""
+    try:
+        if file_ext == '.pdf':
+            return extract_text_from_pdf(file_path)
+        elif file_ext in ['.doc', '.docx']:
+            return extract_text_from_docx(file_path)
+        elif file_ext == '.txt':
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        else:
+            raise ValueError(f"Unsupported file type: {file_ext}")
+    except Exception as e:
+        logger.error(f"Text extraction error: {e}")
+        return ""
+
+def extract_text_from_pdf(file_path):
+    """Extract text from PDF file"""
+    text = ""
+    try:
+        with open(file_path, 'rb') as file:
+            pdf_reader = PyPDF2.PdfReader(file)
+            for page in pdf_reader.pages:
+                text += page.extract_text() + "\n"
+    except Exception as e:
+        logger.error(f"PDF extraction error: {e}")
+    return text
+
+def extract_text_from_docx(file_path):
+    """Extract text from DOCX file"""
+    text = ""
+    try:
+        doc = docx.Document(file_path)
+        for paragraph in doc.paragraphs:
+            text += paragraph.text + "\n"
+    except Exception as e:
+        logger.error(f"DOCX extraction error: {e}")
+    return text
+
+def chunk_text(text, chunk_size=500, overlap=50):
+    """Split text into overlapping chunks for better semantic search"""
+    words = text.split()
+    chunks = []
+    
+    for i in range(0, len(words), chunk_size - overlap):
+        chunk = ' '.join(words[i:i + chunk_size])
+        if chunk.strip():
+            chunks.append(chunk.strip())
+    
+    return chunks
+
+def generate_embeddings(texts):
+    """Generate embeddings using sentence transformer"""
+    try:
+        # Initialize model (you might want to cache this)
+        model = SentenceTransformer('all-MiniLM-L6-v2')
+        embeddings = model.encode(texts)
+        return embeddings.tolist()
+    except Exception as e:
+        logger.error(f"Embedding generation error: {e}")
+        return []
+
+def get_content_type(file_ext):
+    """Get MIME type for file extension"""
+    content_types = {
+        '.pdf': 'application/pdf',
+        '.doc': 'application/msword',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.txt': 'text/plain'
+    }
+    return content_types.get(file_ext, 'application/octet-stream')
 
 # =============================================================================
 # APPLICATION STARTUP
