@@ -1,23 +1,70 @@
+import os
 import openai
-from sentence_transformers import SentenceTransformer
-import numpy as np
-from datetime import datetime
 import json
 import requests
 import time
+import tempfile
+import base64
+from datetime import datetime
+from typing import Dict, List, Optional
+from sentence_transformers import SentenceTransformer
+import numpy as np
+
 from config import Config
 
+# Try to import RAGProcessor if available
+try:
+    from rag_processor import RAGProcessor
+    RAG_AVAILABLE = True
+except ImportError:
+    RAG_AVAILABLE = False
+    print("⚠️ RAGProcessor not available. Knowledge features will be limited.")
+
 class Chatbot:
-    def __init__(self):
+    def __init__(self, db=None):
         self.client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
         self.embedding_model = None  # Will be loaded when needed
         self.heygen_api_key = Config.HEYGEN_API_KEY
+        self.eleven_labs_api_key = Config.ELEVEN_LABS_API_KEY
+        self.db = db
         
     def get_embedding_model(self):
         """Lazy load the embedding model to save memory"""
         if self.embedding_model is None:
             self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
         return self.embedding_model
+
+    def enhance_response_with_knowledge(self, user_message: str, influencer_data: Dict) -> str:
+        """Enhanced response with knowledge base integration"""
+        if not RAG_AVAILABLE:
+            return ""
+        
+        try:
+            # Query knowledge base
+            rag_processor = RAGProcessor(
+                supabase_url=os.getenv("SUPABASE_URL"),
+                supabase_key=os.getenv("SUPABASE_SERVICE_KEY"),
+                openai_api_key=os.getenv("OPENAI_API_KEY")
+            )
+            
+            relevant_chunks = rag_processor.query_knowledge(
+                influencer_id=influencer_data['id'],
+                query=user_message,
+                top_k=3
+            )
+            
+            # Build context from relevant chunks
+            knowledge_context = ""
+            if relevant_chunks:
+                knowledge_context = "\n\nAdditional context from my knowledge base:\n"
+                for chunk in relevant_chunks:
+                    if chunk['similarity'] > 0.7:  # Only use highly relevant chunks
+                        knowledge_context += f"- {chunk['chunk_text'][:200]}...\n"
+            
+            return knowledge_context
+        except Exception as e:
+            print(f"Knowledge enhancement error: {e}")
+            return ""
     
     def get_chat_response_with_knowledge(self, message, influencer_id=None, session_id=None, 
                                        influencer_name=None, db=None):
@@ -28,42 +75,44 @@ class Chatbot:
             personal_context = ""
             
             if db and influencer_id:
-                # Generate embedding for the query
-                model = self.get_embedding_model()
-                query_embedding = model.encode([message])[0].tolist()
-                
-                # Search knowledge base
-                knowledge_results = db.search_knowledge_base(influencer_id, query_embedding, limit=3)
-                
                 # Get personal information
-                personal_info = db.get_personal_knowledge(influencer_id)
+                try:
+                    personal_info = db.get_personal_knowledge(influencer_id)
+                    if personal_info:
+                        personal_parts = []
+                        if personal_info.get('bio'):
+                            personal_parts.append(f"About you: {personal_info['bio']}")
+                        if personal_info.get('expertise'):
+                            personal_parts.append(f"Expertise: {personal_info['expertise']}")
+                        if personal_info.get('personality'):
+                            personal_parts.append(f"Communication style: {personal_info['personality']}")
+                        
+                        if personal_parts:
+                            personal_context = f"\n\nPersonal information about you:\n" + "\n".join(personal_parts)
+                except Exception as e:
+                    print(f"Error getting personal info: {e}")
                 
-                # Build knowledge context
-                if knowledge_results:
-                    relevant_chunks = []
-                    for result in knowledge_results:
-                        if result['similarity'] > 0.3:  # Only include relevant results
-                            relevant_chunks.append(f"From {result['document_name']}: {result['text']}")
-                    
-                    if relevant_chunks:
-                        knowledge_context = f"\n\nRelevant information from your knowledge base:\n" + "\n".join(relevant_chunks)
-                
-                # Build personal context
-                if personal_info:
-                    personal_parts = []
-                    if personal_info.get('bio'):
-                        personal_parts.append(f"About you: {personal_info['bio']}")
-                    if personal_info.get('industry'):
-                        personal_parts.append(f"Industry: {personal_info['industry']}")
-                    if personal_info.get('expertise'):
-                        personal_parts.append(f"Expertise: {personal_info['expertise']}")
-                    if personal_info.get('values'):
-                        personal_parts.append(f"Values: {personal_info['values']}")
-                    if personal_info.get('communication_style'):
-                        personal_parts.append(f"Communication style: {personal_info['communication_style']}")
-                    
-                    if personal_parts:
-                        personal_context = f"\n\nPersonal information about you:\n" + "\n".join(personal_parts)
+                # Try to get knowledge from uploaded documents
+                if RAG_AVAILABLE:
+                    try:
+                        # Generate embedding for the query
+                        model = self.get_embedding_model()
+                        query_embedding = model.encode([message])[0].tolist()
+                        
+                        # Search knowledge base
+                        knowledge_results = db.search_knowledge_base(influencer_id, query_embedding, limit=3)
+                        
+                        # Build knowledge context
+                        if knowledge_results:
+                            relevant_chunks = []
+                            for result in knowledge_results:
+                                if result['similarity'] > 0.3:  # Only include relevant results
+                                    relevant_chunks.append(f"From {result['document_name']}: {result['text']}")
+                            
+                            if relevant_chunks:
+                                knowledge_context = f"\n\nRelevant information from your knowledge base:\n" + "\n".join(relevant_chunks)
+                    except Exception as e:
+                        print(f"Knowledge search error: {e}")
             
             # Create enhanced system prompt with knowledge
             system_prompt = self._build_enhanced_system_prompt(
@@ -148,6 +197,50 @@ Remember: You are representing {base_name}, so respond as if you are them, using
         
         import random
         return random.choice(fallback_responses)
+    
+    def get_product_recommendations(self, query: str, influencer_id: str) -> str:
+        """Generate AI-based product recommendations"""
+        try:
+            prompt = f"""You are helping an influencer recommend products related to: {query}
+
+            Generate 3 realistic, specific product recommendations that would be relevant.
+            For each product, provide:
+            - A specific product name
+            - A realistic price range
+            - A brief compelling description
+            - Why it's relevant to the query
+
+            Format as a clean, engaging product list that feels natural in a conversation.
+            """
+            
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a helpful product recommendation assistant."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=400,
+                temperature=0.7
+            )
+            
+            ai_response = response.choices[0].message.content.strip()
+            
+            # Get influencer's affiliate links for formatting
+            if self.db:
+                try:
+                    affiliate_links = self.db.get_affiliate_links(influencer_id)
+                    if affiliate_links:
+                        primary_link = next((link for link in affiliate_links if link.get('is_primary')), affiliate_links[0])
+                        platform_name = primary_link.get('platform', '').replace('_', ' ').title()
+                        ai_response += f"\n\n💡 *I can help you find these products on {platform_name} - just let me know what interests you!*"
+                except:
+                    pass
+            
+            return ai_response
+            
+        except Exception as e:
+            print(f"Product recommendation error: {str(e)}")
+            return f"I'd be happy to help you find products related to {query}! Let me know what specific features or budget you have in mind."
     
     def generate_video_response(self, text_response, avatar_id, voice_id=None):
         """Generate video response using HeyGen with enhanced error handling"""
@@ -234,6 +327,25 @@ Remember: You are representing {base_name}, so respond as if you are them, using
         except Exception as e:
             print(f"❌ Unexpected error in video generation: {str(e)}")
             return ""
+    
+    def generate_avatar_video_with_voice(self, text_response, influencer_id, voice_id):
+        """Generate avatar video with specific voice"""
+        if not self.db:
+            print("❌ No database connection for avatar video generation")
+            return ""
+        
+        # Get influencer data
+        influencer = self.db.get_influencer(influencer_id)
+        if not influencer:
+            print(f"❌ Influencer not found: {influencer_id}")
+            return ""
+        
+        avatar_id = influencer.get('heygen_avatar_id')
+        if not avatar_id:
+            print(f"❌ No avatar ID found for influencer: {influencer_id}")
+            return ""
+        
+        return self.generate_video_response(text_response, avatar_id, voice_id)
     
     def _prepare_text_for_video(self, text):
         """Prepare text for video generation by cleaning and limiting length"""
@@ -331,9 +443,6 @@ Remember: You are representing {base_name}, so respond as if you are them, using
         print(f"⏰ Video generation timed out after {max_attempts} attempts")
         return ""
 
-    # [Rest of the class methods remain the same...]
-    # (Including product recommendations, voice generation, etc.)
-    
     def get_chat_response(self, message, influencer_id=None, session_id=None, influencer_name=None):
         """Generate a conversational response with context."""
         context = ""
@@ -346,447 +455,44 @@ Remember: You are representing {base_name}, so respond as if you are them, using
         
         # Add chat history for context if session_id is provided
         if self.db and influencer_id and session_id:
-            chat_history = self.db.get_chat_history(influencer_id, session_id, limit=5)
-            if chat_history:
-                context += "Recent conversation history:\n"
-                # Reverse to get chronological order
-                for chat in reversed(chat_history):
-                    context += f"User: {chat['user_message']}\n"
-                    context += f"You: {chat['bot_response']}\n"
-                context += "\n"
-        
-        prompt = f"""You are a friendly, helpful AI assistant for an influencer{' named ' + influencer_name if influencer_name else ''}. 
-        {context}
-        Respond to the following message in a conversational, engaging way:
-        
-        User message: {message}
-        
-        Keep your response concise (2-3 sentences max) and personable."""
-        
-        # Use the LLM to generate response
-        response = self.llm.invoke(prompt)
-        return response.content if hasattr(response, 'content') else str(response)
-
-    def get_chat_response(self, message, influencer_id=None, session_id=None, influencer_name=None):
-        """Generate a conversational response with context."""
-        context = ""
-        
-        # Add influencer bio if available and relevant
-        if self.db and influencer_id:
-            influencer = self.db.get_influencer(influencer_id)
-            if influencer and influencer.get("bio"):
-                context += f"Influencer Bio: {influencer['bio']}\n\n"
-        
-        # Add chat history for context if session_id is provided
-        if self.db and influencer_id and session_id:
-            chat_history = self.db.get_chat_history(influencer_id, session_id, limit=5)
-            if chat_history:
-                context += "Recent conversation history:\n"
-                # Reverse to get chronological order
-                for chat in reversed(chat_history):
-                    context += f"User: {chat['user_message']}\n"
-                    context += f"You: {chat['bot_response']}\n"
-                context += "\n"
-        
-        prompt = f"""You are a friendly, helpful AI assistant for an influencer{' named ' + influencer_name if influencer_name else ''}. 
-        {context}
-        Respond to the following message in a conversational, engaging way:
-        
-        User message: {message}
-        
-        Keep your response concise (2-3 sentences max) and personable."""
-        
-        # Use the LLM to generate response
-        response = self.llm.invoke(prompt)
-        return response.content if hasattr(response, 'content') else str(response)
-
-    def get_response(self, message, influencer_id, session_id=None, influencer_name=None, voice_mode=False, voice_id=None):
-        """Generate a response with optional product recommendations and voice."""
-        # Check if the message indicates product interest
-        is_product_query, product_query = self.analyze_message_for_product_intent(message)
-        
-        # Determine if we should promote a product based on conversation settings
-        should_promote = False
-        if session_id and self.db:
-            should_promote = self.should_promote_product(influencer_id, session_id)
-
-        if voice_id:
-            # Pass the user's selected voice to video generation
-            video_url = self.generate_avatar_video_with_voice(chat_response, influencer_id, voice_id)
-        else:
-            video_url = self.generate_avatar_video(chat_response, influencer_id)        
-            
-        # Generate conversational response
-        chat_response = self.get_chat_response(message, influencer_id, session_id, influencer_name)
-        
-        # Handle product recommendations
-        full_response = chat_response
-        
-        # If explicit product interest is detected, use that query
-        if is_product_query:
-            product_recommendations = self.get_product_recommendations(product_query, influencer_id)
-            full_response = f"{chat_response}\n\n{product_recommendations}"
-            was_promotion = True
-        # Otherwise, if it's time to promote based on settings, use the default product
-        elif should_promote:
-            product_query = self.get_product_query_for_promotion(influencer_id)
-            if product_query:
-                product_recommendations = self.get_product_recommendations(product_query, influencer_id)
-                full_response = f"{chat_response}\n\n{product_recommendations}"
-                was_promotion = True
-            else:
-                was_promotion = False
-        else:
-            was_promotion = False
-        
-        # Update conversation counter if we have a session and db
-        if session_id and self.db:
-            self.db.increment_conversation_counter(influencer_id, session_id, was_promotion)
-        
-        # Generate video avatar for the chat response only (not including product recommendations)
-        video_url = self.generate_avatar_video(chat_response, influencer_id)
-        
-        # Generate audio if voice mode is enabled
-        audio_url = None
-        if voice_mode:
             try:
-                # Use the influencer's voice if available, otherwise default
-                if voice_id:
-                    audio_url = self.generate_voice_audio(chat_response, voice_id)
-                else:
-                    audio_url = self.generate_voice_audio(chat_response)
-            except Exception as e:
-                print(f"Voice generation error: {str(e)}")
-                audio_url = None
-            
-        return {
-            "text": full_response,
-            "chat_response": chat_response,  # Just the conversational part
-            "video_url": video_url,
-            "audio_url": audio_url,
-            "has_product_recommendations": is_product_query or was_promotion,
-            "voice_mode": voice_mode
-        }
-
-
-    def get_product_recommendations(self, query: str, influencer_id: str) -> str:
-        """Fetch product recommendations with fallback mechanism for available platforms."""
-        # Sanitize and clean the query
-        query = self.sanitize_query(query)
+                chat_history = self.db.get_chat_history(influencer_id, session_id, limit=5)
+                if chat_history:
+                    context += "Recent conversation history:\n"
+                    # Reverse to get chronological order
+                    for chat in reversed(chat_history):
+                        context += f"User: {chat['user_message']}\n"
+                        context += f"You: {chat['bot_response']}\n"
+                    context += "\n"
+            except:
+                pass  # Chat history not available
+        
+        prompt = f"""You are a friendly, helpful AI assistant for an influencer{' named ' + influencer_name if influencer_name else ''}. 
+        {context}
+        Respond to the following message in a conversational, engaging way:
+        
+        User message: {message}
+        
+        Keep your response concise (2-3 sentences max) and personable."""
         
         try:
-            # Get influencer's preferred platform (primary affiliate link)
-            preferred_platform = self.get_influencer_preferred_platform(influencer_id)
-            
-            # Try preferred platform first if it's enabled
-            if preferred_platform and is_platform_enabled(preferred_platform):
-                products = self.fetch_platform_products(query, preferred_platform)
-                if products:
-                    return self.format_products(products, influencer_id, preferred_platform)
-            
-            # Try other enabled platforms in order
-            enabled_platforms = get_enabled_platforms()
-            for platform in enabled_platforms:
-                if platform != preferred_platform:  # Skip if already tried
-                    try:
-                        products = self.fetch_platform_products(query, platform)
-                        if products:
-                            return self.format_products(products, influencer_id, platform)
-                    except Exception as e:
-                        print(f"Error with {platform}: {str(e)}")
-                        continue
-            
-            # If no platforms worked, generate AI-based recommendations
-            return self.generate_ai_product_recommendations(query, influencer_id)
-        
-        except Exception as e:
-            print(f"Product recommendation error: {str(e)}")
-            return self.generate_fallback_recommendations(query)
-
-    def sanitize_query(self, query: str) -> str:
-        """Clean and prepare the query for product search."""
-        # Remove unnecessary words, limit length
-        stop_words = ['recommend', 'suggestions', 'products', 'buy', 'get', 'looking for']
-        for word in stop_words:
-            query = query.lower().replace(word, '').strip()
-        
-        # Truncate to reasonable length
-        return query[:50]
-
-    def get_influencer_preferred_platform(self, influencer_id: str) -> str:
-        """Get the influencer's preferred affiliate platform"""
-        if not self.db:
-            return None
-            
-        primary_affiliate = self.db.get_primary_affiliate_link(influencer_id)
-        return primary_affiliate.get('platform') if primary_affiliate else None
-
-    def fetch_platform_products(self, query: str, platform: str) -> List[Dict]:
-        """Fetch products from a specific platform"""
-        if platform == 'rakuten':
-            return self.fetch_rakuten_products(query)
-        elif platform == 'amazon':
-            return self.fetch_amazon_products(query)
-        elif platform == 'shareasale':
-            return self.fetch_shareasale_products(query)
-        elif platform == 'cj_affiliate':
-            return self.fetch_cj_products(query)
-        else:
-            return []
-
-    def fetch_rakuten_products(self, query: str) -> List[Dict]:
-        """Fetch products from Rakuten API"""
-        if not is_platform_enabled('rakuten'):
-            return []
-            
-        config = AFFILIATE_PLATFORMS['rakuten']
-        headers = {
-            "Authorization": f"Bearer {config['credentials']['token']}",
-            "Content-Type": "application/json"
-        }
-        
-        params = {
-            "keyword": query,
-            "merchant_id": config['credentials']['merchant_id'],
-            "hits": 5,
-            "sort": "standard"
-        }
-        
-        try:
-            response = requests.get(
-                config['base_url'], 
-                headers=headers, 
-                params=params, 
-                timeout=10
+            # Use OpenAI to generate response
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a helpful AI assistant."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=300,
+                temperature=0.7
             )
             
-            if response.status_code == 200:
-                products_data = response.json()
-                products = products_data.get('items', [])
-                return self.transform_products(products, 'rakuten')
-        except Exception as e:
-            print(f"Rakuten API error: {str(e)}")
-        
-        return []
-
-    def fetch_amazon_products(self, query: str) -> List[Dict]:
-        """Fetch products from Amazon Associates API (PAAPI 5.0)"""
-        if not is_platform_enabled('amazon'):
-            return []
-        
-        # Note: Amazon PAAPI 5.0 requires complex authentication
-        # For now, return empty list - implement when you get Amazon credentials
-        print("Amazon API not yet implemented - credentials needed")
-        return []
-
-    def fetch_shareasale_products(self, query: str) -> List[Dict]:
-        """Fetch products from ShareASale API"""
-        if not is_platform_enabled('shareasale'):
-            return []
-        
-        # ShareASale API implementation
-        print("ShareASale API not yet implemented - credentials needed")
-        return []
-
-    def fetch_cj_products(self, query: str) -> List[Dict]:
-        """Fetch products from CJ Affiliate API"""
-        if not is_platform_enabled('cj_affiliate'):
-            return []
-        
-        # CJ Affiliate API implementation
-        print("CJ Affiliate API not yet implemented - credentials needed")
-        return []
-
-    def generate_ai_product_recommendations(self, query: str, influencer_id: str) -> str:
-        """Generate AI-based product recommendations when APIs aren't available"""
-        prompt = f"""You are helping an influencer recommend products related to: {query}
-
-        Generate 3-5 realistic, specific product recommendations that would be relevant.
-        For each product, provide:
-        - A specific product name
-        - A realistic price range
-        - A brief compelling description
-        - Why it's relevant to the query
-
-        Format as a clean, engaging product list that feels natural in a conversation.
-        """
-        
-        try:
-            response = self.llm.invoke(prompt)
-            ai_response = response.content if hasattr(response, 'content') else str(response)
-            
-            # Get influencer's affiliate links for formatting
-            affiliate_links = self.db.get_affiliate_links(influencer_id) if self.db else []
-            
-            # Add affiliate context if available
-            if affiliate_links:
-                primary_link = next((link for link in affiliate_links if link.get('is_primary')), affiliate_links[0])
-                platform_name = primary_link.get('platform', '').replace('_', ' ').title()
-                
-                ai_response += f"\n\n💡 *I can help you find these products on {platform_name} - just let me know what interests you!*"
-            else:
-                ai_response += f"\n\n💡 *These are some great options to consider for {query}!*"
-            
-            return ai_response
+            return response.choices[0].message.content.strip()
             
         except Exception as e:
-            print(f"AI recommendation error: {str(e)}")
-            return self.generate_fallback_recommendations(query)
-
-    def generate_fallback_recommendations(self, query: str) -> str:
-        """Generate a fallback recommendation message."""
-        fallback_message = f"""I couldn't find specific products for "{query}", 
-        but here are some general recommendations:\n\n"""
-        
-        generic_products = [
-            {"productname": "Versatile Tech Accessory", "price": "$49.99", "producturl": "#", "imageurl": ""},
-            {"productname": "Stylish Everyday Item", "price": "$29.99", "producturl": "#", "imageurl": ""},
-            {"productname": "Practical Lifestyle Product", "price": "$39.99", "producturl": "#", "imageurl": ""},
-            {"productname": "Trending Gadget", "price": "$79.99", "producturl": "#", "imageurl": ""},
-            {"productname": "Useful Companion Product", "price": "$59.99", "producturl": "#", "imageurl": ""}
-        ]
-        
-        return self.format_products(generic_products, "generic", "generic")
-
-    def transform_products(self, products: List[Dict], platform: str) -> List[Dict]:
-        """Transform various product formats to a standard format."""
-        standard_products = []
-        
-        for product in products[:5]:
-            standard_product = {
-                'productname': product.get('name', product.get('title', 'Unnamed Product')),
-                'price': product.get('price', product.get('regularPrice', 'N/A')),
-                'producturl': product.get('url', product.get('productUrl', '#')),
-                'imageurl': product.get('image', product.get('imageUrl', ''))
-            }
-            standard_products.append(standard_product)
-        
-        return standard_products
-
-    def format_products(self, products: List[Dict], influencer_id: str, platform: str) -> str:
-        """Format product recommendations with affiliate links"""
-        if not products:
-            return "Sorry, I couldn't find any products for that search."
-        
-        # Get influencer's affiliate ID for this platform
-        affiliate_id = self.get_affiliate_id_for_platform(influencer_id, platform)
-        
-        formatted_products = []
-        
-        for product in products[:5]:  # Limit to 5 items
-            title = product.get('productname', 'No title')
-            price = product.get('price', 'Price not available')
-            url = product.get('producturl', '#')
-            image_url = product.get('imageurl', '')
-            
-            # Create affiliate URL based on platform
-            affiliate_url = self.create_affiliate_url(url, platform, affiliate_id)
-            
-            product_info = f"🛒 **{title}** - {price}\n"
-            if image_url:
-                product_info += f"📷 [Product Image]({image_url})\n"
-            product_info += f"🔗 [View Product]({affiliate_url})"
-            
-            formatted_products.append(product_info)
-
-        if formatted_products:
-            platform_name = AFFILIATE_PLATFORMS.get(platform, {}).get('name', platform.title())
-            recommendations = "\n\n".join(formatted_products)
-            return f"### Recommended Products from {platform_name}\n\n{recommendations}"
-        else:
-            return self.generate_ai_product_recommendations(query, influencer_id)
-
-    def get_affiliate_id_for_platform(self, influencer_id: str, platform: str) -> str:
-        """Get affiliate ID for a specific platform"""
-        if not self.db:
-            return ""
-            
-        affiliate_links = self.db.get_affiliate_links(influencer_id, platform)
-        return affiliate_links[0].get('affiliate_id', '') if affiliate_links else ""
-
-    def create_affiliate_url(self, base_url: str, platform: str, affiliate_id: str) -> str:
-        """Create platform-specific affiliate URLs"""
-        if not affiliate_id:
-            return base_url
-            
-        if platform == 'rakuten':
-            return f"{base_url}?mid={affiliate_id}"
-        elif platform == 'amazon':
-            return f"{base_url}?tag={affiliate_id}"
-        elif platform == 'shareasale':
-            return f"{base_url}?afftrack={affiliate_id}"
-        elif platform == 'cj_affiliate':
-            return f"{base_url}?cid={affiliate_id}"
-        else:
-            return f"{base_url}?ref={affiliate_id}"
-
-    def analyze_message_for_product_intent(self, message):
-        """Determine if the message indicates product interest and extract query."""
-        # Keywords that suggest product interest
-        product_keywords = ["recommend", "suggest", "buy", "purchase", "product", 
-                        "shopping", "shop", "get", "want", "need", "looking for"]
-        
-        message_lower = message.lower()
-        
-        # Check if any keyword is in the message
-        for keyword in product_keywords:
-            if keyword in message_lower:
-                # Extract potential product query - everything after the keyword
-                query_start = message_lower.find(keyword) + len(keyword)
-                query = message[query_start:].strip()
-                
-                # If query is too short, use the whole message
-                if len(query) < 3:
-                    query = message
-                
-                return True, query
-        
-        return False, ""
-
-    def should_promote_product(self, influencer_id, session_id):
-        """Determine if it's time to promote a product based on conversation counter and settings"""
-        if not self.db or not session_id:
-            return False
-            
-        # Get promotion settings
-        settings = self.db.get_promotion_settings(influencer_id)
-        if not settings:
-            return False
-            
-        # If always promote at end is enabled, return True
-        if settings.get("promote_at_end", False):
-            return True
-            
-        # Get conversation counter
-        counter = self.db.get_conversation_counter(influencer_id, session_id)
-        if not counter:
-            return False
-            
-        # Check if we've reached the promotion frequency
-        message_count = counter.get("message_count", 0)
-        promotion_frequency = settings.get("promotion_frequency", 3)
-        
-        # Check if we've reached the frequency threshold (after incrementing counter)
-        return (message_count + 1) % promotion_frequency == 0
-
-    def get_product_query_for_promotion(self, influencer_id):
-        """Get the query to use for product promotion"""
-        if not self.db:
-            return None
-            
-        # Check for default product in settings
-        settings = self.db.get_promotion_settings(influencer_id)
-        if settings and settings.get("default_product"):
-            return settings.get("default_product")
-            
-        # Check for default product in products table
-        default_product = self.db.get_default_product(influencer_id)
-        if default_product:
-            return default_product.get("product_query")
-            
-        # No default product, return None
-        return None
-
+            print(f"Chat response error: {e}")
+            return self.get_fallback_response(message, influencer_name)
+    
     def generate_voice_audio(self, text, voice_id=None):
         """Generate audio using multiple TTS services with robust fallback."""
         # List of TTS services to try
@@ -926,156 +632,3 @@ Remember: You are representing {base_name}, so respond as if you are them, using
         except Exception as e:
             print(f"Default audio generation error: {str(e)}")
             return None
-    
-    def create_cloned_voice(self, name, audio_files, description=""):
-        """Create a cloned voice using ElevenLabs Voice Clone API"""
-        if not self.eleven_labs_api_key:
-            print("ElevenLabs API key not configured")
-            return None, "ElevenLabs API key not configured"
-            
-        headers = {
-            "xi-api-key": self.eleven_labs_api_key
-        }
-        
-        # ElevenLabs requires at least 1 minute of clear audio
-        # We'll assume the provided audio files meet this requirement
-        
-        # Prepare the form data
-        form_data = {
-            "name": name,
-            "description": description
-        }
-        
-        files = []
-        for i, audio_file in enumerate(audio_files):
-            # audio_file should be bytes or a file path
-            if isinstance(audio_file, bytes):
-                files.append(
-                    ('files', (f'sample_{i}.mp3', audio_file, 'audio/mpeg'))
-                )
-            else:
-                files.append(
-                    ('files', (f'sample_{i}.mp3', open(audio_file, 'rb'), 'audio/mpeg'))
-                )
-        
-        try:
-            response = requests.post(
-                "https://api.elevenlabs.io/v1/voices/add",
-                headers=headers,
-                data=form_data,
-                files=files
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                voice_id = result.get("voice_id")
-                return voice_id, "Voice created successfully"
-            else:
-                error_message = f"Error creating voice: {response.status_code} - {response.text}"
-                print(error_message)
-                return None, error_message
-        except Exception as e:
-            error_message = f"Exception creating voice: {str(e)}"
-            print(error_message)
-            return None, error_message
-        finally:
-            # Close file handles if we opened any
-            for file_tuple in files:
-                if not isinstance(file_tuple[1][1], bytes):
-                    file_tuple[1][1].close()
-    
-    def get_available_voices(self):
-        """Get list of available voices from ElevenLabs"""
-        if not self.eleven_labs_api_key:
-            print("ElevenLabs API key not configured")
-            return []
-            
-        headers = {
-            "xi-api-key": self.eleven_labs_api_key
-        }
-        
-        try:
-            response = requests.get(
-                "https://api.elevenlabs.io/v1/voices",
-                headers=headers
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                voices = result.get("voices", [])
-                
-                # Format voice data
-                formatted_voices = [
-                    {
-                        "voice_id": voice.get("voice_id"),
-                        "name": voice.get("name"),
-                        "preview_url": voice.get("preview_url"),
-                        "description": voice.get("description", "")
-                    }
-                    for voice in voices
-                ]
-                
-                return formatted_voices
-            else:
-                print(f"Error getting voices: {response.status_code} - {response.text}")
-                return []
-        except Exception as e:
-            print(f"Exception getting voices: {str(e)}")
-            return []
-    
-    def transcribe_audio(self, audio_file):
-        """Transcribe audio file to text using OpenAI Whisper API"""
-        if not OPENAI_API_KEY:
-            print("OpenAI API key not configured")
-            return None
-            
-        temp_file = None
-        temp_filename = None
-        
-        try:
-            # Use temporary file if audio_file is bytes
-            if isinstance(audio_file, bytes):
-                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
-                temp_filename = temp_file.name
-                temp_file.write(audio_file)
-                temp_file.close()  # Close the file explicitly before using it
-                audio_path = temp_filename
-            else:
-                audio_path = audio_file
-                
-            # Create a file object for the request
-            with open(audio_path, 'rb') as file_obj:
-                files = {'file': file_obj}
-                headers = {'Authorization': f'Bearer {OPENAI_API_KEY}'}
-                
-                response = requests.post(
-                    'https://api.openai.com/v1/audio/transcriptions',
-                    headers=headers,
-                    files=files,
-                    data={'model': 'whisper-1'}
-                )
-            
-            if response.status_code == 200:
-                result = response.json()
-                return result.get('text')
-            else:
-                print(f"Error transcribing audio: {response.status_code} - {response.text}")
-                return None
-        except Exception as e:
-            print(f"Exception transcribing audio: {str(e)}")
-            return None
-        finally:
-            # Clean up temporary file if we created one
-            if temp_filename:
-                try:
-                    # Add a small delay to ensure file is released
-                    import time
-                    time.sleep(0.1)
-                    
-                    # Then try to remove it
-                    import os
-                    if os.path.exists(temp_filename):
-                        os.remove(temp_filename)
-                except Exception as e:
-                    print(f"Warning: Could not remove temporary file {temp_filename}: {str(e)}")
-                    # Continue execution even if cleanup fails

@@ -1,8 +1,10 @@
 import os
+import uuid
+import json
+import math
 from supabase import create_client, Client
 from typing import Optional, Dict, List
 import logging
-import uuid
 from datetime import datetime, timezone
 
 # Set up logging
@@ -76,6 +78,22 @@ class Database:
         except Exception as e:
             logger.error(f"Embed configurations table doesn't exist: {str(e)}")
             print("Please create the 'embed_configurations' table manually in Supabase dashboard")
+
+        # Check knowledge_documents table
+        try:
+            self.supabase.table("knowledge_documents").select("*").limit(1).execute()
+            logger.info("Knowledge documents table exists")
+        except Exception as e:
+            logger.error(f"Knowledge documents table doesn't exist: {str(e)}")
+            print("Please create the 'knowledge_documents' table manually in Supabase dashboard")
+
+        # Check knowledge_chunks table
+        try:
+            self.supabase.table("knowledge_chunks").select("*").limit(1).execute()
+            logger.info("Knowledge chunks table exists")
+        except Exception as e:
+            logger.error(f"Knowledge chunks table doesn't exist: {str(e)}")
+            print("Please create the 'knowledge_chunks' table manually in Supabase dashboard")
 
     # =============================================================================
     # INFLUENCER MANAGEMENT
@@ -298,6 +316,181 @@ class Database:
         except Exception as e:
             logger.error(f"Error getting pending avatars: {str(e)}")
             return []
+
+    # =============================================================================
+    # KNOWLEDGE MANAGEMENT
+    # =============================================================================
+    
+    def get_knowledge_documents(self, influencer_id: str) -> List[Dict]:
+        """Get knowledge documents for an influencer"""
+        try:
+            response = self.supabase.table('knowledge_documents') \
+                .select('*') \
+                .eq('influencer_id', influencer_id) \
+                .order('upload_date', desc=True) \
+                .execute()
+            return response.data if response.data else []
+        except Exception as e:
+            logger.error(f"Error getting knowledge documents: {e}")
+            return []
+
+    def save_knowledge_document(self, document_data: Dict) -> Optional[str]:
+        """Save knowledge document metadata"""
+        try:
+            response = self.supabase.table('knowledge_documents') \
+                .insert(document_data) \
+                .execute()
+            return response.data[0]['id'] if response.data else None
+        except Exception as e:
+            logger.error(f"Error saving knowledge document: {e}")
+            return None
+
+    def delete_knowledge_document(self, document_id: str, influencer_id: str) -> bool:
+        """Delete a knowledge document"""
+        try:
+            # First delete associated chunks
+            self.supabase.table('knowledge_chunks') \
+                .delete() \
+                .eq('document_id', document_id) \
+                .eq('influencer_id', influencer_id) \
+                .execute()
+            
+            # Then delete the document
+            response = self.supabase.table('knowledge_documents') \
+                .delete() \
+                .eq('id', document_id) \
+                .eq('influencer_id', influencer_id) \
+                .execute()
+            return bool(response.data)
+        except Exception as e:
+            logger.error(f"Error deleting knowledge document: {e}")
+            return False
+
+    def get_personal_knowledge(self, influencer_id: str) -> Optional[Dict]:
+        """Get personal knowledge information from influencer profile"""
+        try:
+            influencer = self.get_influencer(influencer_id)
+            if not influencer:
+                return None
+            
+            return {
+                'bio': influencer.get('bio', ''),
+                'expertise': influencer.get('expertise', ''),
+                'personality': influencer.get('personality', '')
+            }
+        except Exception as e:
+            logger.error(f"Error getting personal knowledge: {e}")
+            return None
+
+    def save_personal_knowledge(self, influencer_id: str, personal_data: Dict) -> bool:
+        """Save personal knowledge information to influencer profile"""
+        try:
+            # Extract only the fields we want to update
+            update_data = {}
+            if 'bio' in personal_data:
+                update_data['bio'] = personal_data['bio']
+            if 'expertise' in personal_data:
+                update_data['expertise'] = personal_data['expertise']
+            if 'personality' in personal_data:
+                update_data['personality'] = personal_data['personality']
+            
+            return self.update_influencer(influencer_id, update_data)
+        except Exception as e:
+            logger.error(f"Error saving personal knowledge: {e}")
+            return False
+
+    def search_knowledge_base(self, influencer_id: str, query_embedding: List[float], limit: int = 5) -> List[Dict]:
+        """Search knowledge base using semantic similarity"""
+        try:
+            # Get all chunks for the influencer
+            response = self.supabase.table('knowledge_chunks') \
+                .select('*, knowledge_documents(filename)') \
+                .eq('influencer_id', influencer_id) \
+                .execute()
+            
+            chunks = response.data if response.data else []
+            
+            # Calculate similarities
+            similarities = []
+            
+            for chunk in chunks:
+                try:
+                    if chunk['embedding']:
+                        # Parse embedding from string
+                        chunk_embedding = json.loads(chunk['embedding']) if isinstance(chunk['embedding'], str) else chunk['embedding']
+                        
+                        # Calculate cosine similarity
+                        similarity = self._cosine_similarity(query_embedding, chunk_embedding)
+                        
+                        similarities.append({
+                            'chunk_id': chunk['id'],
+                            'document_id': chunk['document_id'],
+                            'text': chunk['chunk_text'],
+                            'similarity': float(similarity),
+                            'chunk_index': chunk['chunk_index'],
+                            'document_name': chunk['knowledge_documents']['filename'] if chunk['knowledge_documents'] else 'Unknown'
+                        })
+                        
+                except Exception as embedding_error:
+                    logger.error(f"Error processing embedding for chunk {chunk['id']}: {embedding_error}")
+                    continue
+            
+            # Sort by similarity and return top results
+            similarities.sort(key=lambda x: x['similarity'], reverse=True)
+            return similarities[:limit]
+            
+        except Exception as e:
+            logger.error(f"Error searching knowledge base: {e}")
+            return []
+
+    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+        """Calculate cosine similarity between two vectors"""
+        try:
+            dot_product = sum(a * b for a, b in zip(vec1, vec2))
+            magnitude1 = math.sqrt(sum(a * a for a in vec1))
+            magnitude2 = math.sqrt(sum(a * a for a in vec2))
+            
+            if magnitude1 == 0 or magnitude2 == 0:
+                return 0
+            
+            return dot_product / (magnitude1 * magnitude2)
+        except Exception as e:
+            logger.error(f"Error calculating cosine similarity: {e}")
+            return 0
+
+    def store_chat_interaction(self, interaction_data: Dict) -> bool:
+        """Store chat interaction for analytics"""
+        try:
+            # Add ID and timestamp if not present
+            if 'id' not in interaction_data:
+                interaction_data['id'] = str(uuid.uuid4())
+            if 'created_at' not in interaction_data:
+                interaction_data['created_at'] = datetime.now(timezone.utc).isoformat()
+            
+            response = self.supabase.table('chat_interactions').insert(interaction_data).execute()
+            return bool(response.data)
+        except Exception as e:
+            logger.error(f"Error storing chat interaction: {e}")
+            return False
+
+    def get_knowledge_for_chat(self, influencer_id: str, query: str, limit: int = 3) -> Dict:
+        """Get relevant knowledge for chat responses"""
+        try:
+            result = {
+                'personal_info': None,
+                'relevant_chunks': []
+            }
+            
+            # Get personal information
+            personal_info = self.get_personal_knowledge(influencer_id)
+            if personal_info:
+                result['personal_info'] = personal_info
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error getting knowledge for chat: {e}")
+            return {'personal_info': None, 'relevant_chunks': []}
 
     # =============================================================================
     # PROMOTION SETTINGS
@@ -770,219 +963,3 @@ class Database:
         except Exception as e:
             logger.error(f"Error incrementing conversation counter: {str(e)}")
             return None
-        
-        def save_personal_knowledge(self, user_id: str, personal_data: dict) -> bool:
-        """Save or update user's personal knowledge information"""
-        try:
-            # Check if personal knowledge already exists
-            existing = self.supabase.table('user_personal_knowledge').select('*').eq('user_id', user_id).execute()
-            
-            if existing.data:
-                # Update existing record
-                result = self.supabase.table('user_personal_knowledge').update(personal_data).eq('user_id', user_id).execute()
-            else:
-                # Insert new record
-                result = self.supabase.table('user_personal_knowledge').insert(personal_data).execute()
-            
-            return len(result.data) > 0
-            
-        except Exception as e:
-            print(f"Database error saving personal knowledge: {e}")
-            return False
-    
-    def get_personal_knowledge(self, user_id: str) -> Optional[dict]:
-        """Get user's personal knowledge information"""
-        try:
-            result = self.supabase.table('user_personal_knowledge').select('*').eq('user_id', user_id).execute()
-            
-            if result.data:
-                return result.data[0]
-            return None
-            
-        except Exception as e:
-            print(f"Database error getting personal knowledge: {e}")
-            return None
-    
-    def save_knowledge_document(self, document_data: dict) -> bool:
-        """Save knowledge document and its embeddings"""
-        try:
-            # Save main document record
-            doc_record = {
-                'id': document_data['id'],
-                'user_id': document_data['user_id'],
-                'filename': document_data['filename'],
-                'file_path': document_data['file_path'],
-                'file_url': document_data['file_url'],
-                'file_type': document_data['file_type'],
-                'file_size': document_data['file_size'],
-                'text_content': document_data['text_content'],
-                'uploaded_at': document_data['uploaded_at']
-            }
-            
-            result = self.supabase.table('knowledge_documents').insert(doc_record).execute()
-            
-            if not result.data:
-                return False
-            
-            # Save text chunks with embeddings
-            chunks_data = []
-            for i, (chunk, embedding) in enumerate(zip(document_data['chunks'], document_data['embeddings'])):
-                chunks_data.append({
-                    'id': f"{document_data['id']}_{i}",
-                    'document_id': document_data['id'],
-                    'user_id': document_data['user_id'],
-                    'chunk_index': i,
-                    'text_content': chunk,
-                    'embedding': json.dumps(embedding),  # Store as JSON string
-                    'created_at': document_data['uploaded_at']
-                })
-            
-            # Insert chunks in batches if many
-            if chunks_data:
-                chunk_result = self.supabase.table('knowledge_chunks').insert(chunks_data).execute()
-                return len(chunk_result.data) > 0
-            
-            return True
-            
-        except Exception as e:
-            print(f"Database error saving knowledge document: {e}")
-            return False
-    
-    def get_knowledge_documents(self, user_id: str) -> List[dict]:
-        """Get list of user's knowledge documents"""
-        try:
-            result = self.supabase.table('knowledge_documents').select('id, filename, file_size, file_type, uploaded_at').eq('user_id', user_id).order('uploaded_at', desc=True).execute()
-            
-            documents = []
-            for doc in result.data:
-                documents.append({
-                    'id': doc['id'],
-                    'name': doc['filename'],
-                    'size': doc['file_size'],
-                    'type': doc['file_type'],
-                    'uploaded_at': doc['uploaded_at']
-                })
-            
-            return documents
-            
-        except Exception as e:
-            print(f"Database error getting knowledge documents: {e}")
-            return []
-    
-    def get_knowledge_document(self, user_id: str, document_id: str) -> Optional[dict]:
-        """Get specific knowledge document"""
-        try:
-            result = self.supabase.table('knowledge_documents').select('*').eq('user_id', user_id).eq('id', document_id).execute()
-            
-            if result.data:
-                return result.data[0]
-            return None
-            
-        except Exception as e:
-            print(f"Database error getting knowledge document: {e}")
-            return None
-    
-    def delete_knowledge_document(self, user_id: str, document_id: str) -> bool:
-        """Delete knowledge document and its chunks"""
-        try:
-            # Delete chunks first
-            chunks_result = self.supabase.table('knowledge_chunks').delete().eq('user_id', user_id).eq('document_id', document_id).execute()
-            
-            # Delete main document
-            doc_result = self.supabase.table('knowledge_documents').delete().eq('user_id', user_id).eq('id', document_id).execute()
-            
-            return True  # Consider success if at least document is deleted
-            
-        except Exception as e:
-            print(f"Database error deleting knowledge document: {e}")
-            return False
-    
-    def search_knowledge_base(self, user_id: str, query_embedding: List[float], limit: int = 5) -> List[dict]:
-        """Search knowledge base using semantic similarity"""
-        try:
-            # Get all chunks for the user
-            chunks_result = self.supabase.table('knowledge_chunks').select('*').eq('user_id', user_id).execute()
-            
-            if not chunks_result.data:
-                return []
-            
-            # Calculate similarities
-            similarities = []
-            query_embedding = np.array(query_embedding)
-            
-            for chunk in chunks_result.data:
-                try:
-                    chunk_embedding = np.array(json.loads(chunk['embedding']))
-                    
-                    # Calculate cosine similarity
-                    similarity = np.dot(query_embedding, chunk_embedding) / (
-                        np.linalg.norm(query_embedding) * np.linalg.norm(chunk_embedding)
-                    )
-                    
-                    similarities.append({
-                        'chunk_id': chunk['id'],
-                        'document_id': chunk['document_id'],
-                        'text': chunk['text_content'],
-                        'similarity': float(similarity),
-                        'chunk_index': chunk['chunk_index']
-                    })
-                    
-                except Exception as embedding_error:
-                    print(f"Error processing embedding for chunk {chunk['id']}: {embedding_error}")
-                    continue
-            
-            # Sort by similarity and return top results
-            similarities.sort(key=lambda x: x['similarity'], reverse=True)
-            
-            # Get document names for the results
-            top_results = similarities[:limit]
-            document_ids = list(set([result['document_id'] for result in top_results]))
-            
-            # Fetch document metadata
-            if document_ids:
-                docs_result = self.supabase.table('knowledge_documents').select('id, filename').in_('id', document_ids).execute()
-                doc_names = {doc['id']: doc['filename'] for doc in docs_result.data}
-                
-                # Add document names to results
-                for result in top_results:
-                    result['document_name'] = doc_names.get(result['document_id'], 'Unknown')
-            
-            return top_results
-            
-        except Exception as e:
-            print(f"Database error searching knowledge base: {e}")
-            return []
-    
-    def get_knowledge_for_chat(self, user_id: str, query: str, limit: int = 3) -> dict:
-        """Get relevant knowledge for chat responses"""
-        try:
-            result = {
-                'personal_info': None,
-                'relevant_chunks': []
-            }
-            
-            # Get personal information
-            personal_info = self.get_personal_knowledge(user_id)
-            if personal_info:
-                result['personal_info'] = {
-                    'bio': personal_info.get('bio', ''),
-                    'industry': personal_info.get('industry', ''),
-                    'expertise': personal_info.get('expertise', ''),
-                    'values': personal_info.get('values', ''),
-                    'communication_style': personal_info.get('communication_style', '')
-                }
-            
-            return result
-            
-        except Exception as e:
-            print(f"Database error getting knowledge for chat: {e}")
-            return {'personal_info': None, 'relevant_chunks': []}
-        
-    def store_chat_interaction(self, interaction_data: dict) -> bool:
-        """Store chat interaction for analytics"""
-        try:
-            result = self.supabase.table('chat_interactions').insert(interaction_data).execute()
-            return len(result.data) > 0
-        except Exception as e:
-            print(f"Database error storing chat interaction: {e}")
-            return False

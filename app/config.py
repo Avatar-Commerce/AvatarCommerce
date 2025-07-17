@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
+# Individual variables (backwards compatibility)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 HEYGEN_API_KEY = os.getenv("HEYGEN_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -21,6 +22,40 @@ AMAZON_ASSOCIATES_PARTNER_TAG = os.getenv("AMAZON_ASSOCIATES_PARTNER_TAG")
 SHAREASALE_API_TOKEN = os.getenv("SHAREASALE_API_TOKEN")
 SHAREASALE_SECRET_KEY = os.getenv("SHAREASALE_SECRET_KEY")
 CJ_AFFILIATE_API_KEY = os.getenv("CJ_AFFILIATE_API_KEY")
+
+# Config class for chatbot.py compatibility
+class Config:
+    """Application configuration class"""
+    
+    # Environment variables
+    SUPABASE_URL = os.getenv("SUPABASE_URL")
+    SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+    SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    HEYGEN_API_KEY = os.getenv("HEYGEN_API_KEY")
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "default-secret-key")
+    ELEVEN_LABS_API_KEY = os.getenv("ELEVEN_LABS_API_KEY")
+    
+    # Application settings
+    MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
+    UPLOAD_FOLDER = 'uploads'
+    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'pdf', 'doc', 'docx'}
+    JWT_EXPIRATION_DAYS = 30
+    
+    # API settings
+    HEYGEN_API_BASE = "https://api.heygen.com"
+    DEFAULT_VOICE_ID = "2d5b0e6cf36f460aa7fc47e3eee4ba54"
+    
+    @classmethod
+    def validate(cls):
+        """Validate required environment variables"""
+        required_vars = [
+            'SUPABASE_URL', 'SUPABASE_KEY', 'HEYGEN_API_KEY', 
+            'OPENAI_API_KEY', 'JWT_SECRET_KEY'
+        ]
+        missing = [var for var in required_vars if not getattr(cls, var)]
+        if missing:
+            raise ValueError(f"Missing required environment variables: {missing}")
 
 # Dynamic affiliate platform configurations - only include if credentials are available
 AFFILIATE_PLATFORMS = {}
