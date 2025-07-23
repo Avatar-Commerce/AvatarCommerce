@@ -102,26 +102,63 @@ class Database:
     def create_influencer(self, user_data: Dict) -> Optional[Dict]:
         """Create influencer with voice preference fields using Supabase"""
         try:
-            # Set default voice if not provided
-            if 'preferred_voice_id' not in user_data:
-                user_data['preferred_voice_id'] = '2d5b0e6cf36f460aa7fc47e3eee4ba54'
+            # Core required fields
+            core_data = {
+                'id': user_data.get('id', str(uuid.uuid4())),
+                'username': user_data['username'],
+                'email': user_data['email'],
+                'password_hash': user_data['password_hash'],
+                'bio': user_data.get('bio', ''),
+                'created_at': user_data.get('created_at', datetime.now(timezone.utc).isoformat()),
+                'updated_at': datetime.now(timezone.utc).isoformat()
+            }
             
-            # Set timestamps
-            now = datetime.now(timezone.utc).isoformat()
-            user_data['created_at'] = user_data.get('created_at', now)
-            user_data['updated_at'] = now
+            # Optional fields - only add if they don't cause column errors
+            optional_fields = {
+                'preferred_voice_id': '2d5b0e6cf36f460aa7fc47e3eee4ba54',
+                'expertise': user_data.get('expertise', ''),
+                'personality': user_data.get('personality', ''),
+                'avatar_training_status': 'none',
+                'avatar_type': 'none'
+            }
             
-            # Insert into Supabase
-            response = self.supabase.table('influencers').insert(user_data).execute()
-            
-            if response.data:
-                created_user = response.data[0]
-                logger.info(f"✅ Created new influencer: {user_data['username']}")
-                return created_user
-            else:
-                logger.error("❌ No data returned from create operation")
-                return None
+            # Try with all fields first
+            try:
+                final_data = {**core_data, **optional_fields}
+                response = self.supabase.table('influencers').insert(final_data).execute()
                 
+                if response.data:
+                    created_user = response.data[0]
+                    logger.info(f"✅ Created new influencer with full schema: {user_data['username']}")
+                    return created_user
+                    
+            except Exception as schema_error:
+                # If that fails, try with just core fields
+                logger.warning(f"⚠️ Full schema failed, trying core fields only: {schema_error}")
+                
+                response = self.supabase.table('influencers').insert(core_data).execute()
+                
+                if response.data:
+                    created_user = response.data[0]
+                    logger.info(f"✅ Created new influencer with core schema: {user_data['username']}")
+                    
+                    # Try to update with optional fields one by one
+                    influencer_id = created_user['id']
+                    for field, value in optional_fields.items():
+                        try:
+                            self.supabase.table('influencers') \
+                                .update({field: value}) \
+                                .eq('id', influencer_id) \
+                                .execute()
+                        except Exception as field_error:
+                            logger.warning(f"⚠️ Could not set {field}: {field_error}")
+                    
+                    # Return the created user (will be fetched fresh if needed)
+                    return created_user
+                else:
+                    logger.error("❌ No data returned from core create operation")
+                    return None
+                    
         except Exception as e:
             logger.error(f"❌ Error creating influencer: {e}")
             return None
