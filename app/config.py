@@ -56,6 +56,15 @@ class Config:
         missing = [var for var in required_vars if not getattr(cls, var)]
         if missing:
             raise ValueError(f"Missing required environment variables: {missing}")
+    
+    # Knowledge document storage
+    KNOWLEDGE_STORAGE_BUCKET = "knowledge-documents"
+    MAX_DOCUMENT_SIZE = 10 * 1024 * 1024  # 10MB
+    ALLOWED_DOCUMENT_TYPES = [
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ]
 
 # Dynamic affiliate platform configurations - only include if credentials are available
 AFFILIATE_PLATFORMS = {}

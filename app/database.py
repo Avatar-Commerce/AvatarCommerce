@@ -1000,3 +1000,166 @@ class Database:
         except Exception as e:
             logger.error(f"Error incrementing conversation counter: {str(e)}")
             return None
+
+    def update_avatar_status(self, influencer_id, avatar_data):
+        """Enhanced avatar status update with better error handling"""
+        try:
+            logger.info(f"💾 Updating avatar status for influencer: {influencer_id}")
+            
+            # Add timestamp
+            avatar_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+            
+            # Update the influencer record
+            result = self.supabase.table('influencers').update(avatar_data).eq('id', influencer_id).execute()
+            
+            if result.data and len(result.data) > 0:
+                logger.info("✅ Avatar status updated successfully")
+                return True
+            else:
+                logger.error("❌ Avatar status update failed - no rows affected")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Database error updating avatar status: {e}")
+            return False
+
+    def get_influencer_by_username(self, username):
+        """FIXED: Get influencer by username with case-insensitive search"""
+        try:
+            # Convert to lowercase for consistent lookup
+            clean_username = username.lower().strip()
+            
+            response = self.supabase.table('influencers')\
+                .select('*')\
+                .ilike('username', clean_username)\
+                .limit(1)\
+                .execute()
+            
+            if response.data and len(response.data) > 0:
+                user = response.data[0]
+                print(f"✅ Found user: {user['username']}")
+                return user
+            else:
+                print(f"❌ User not found: {username}")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Database error getting user by username: {e}")
+            return None
+
+    def get_influencer_by_email(self, email):
+        """FIXED: Get influencer by email with case-insensitive search"""
+        try:
+            # Convert to lowercase for consistent lookup
+            clean_email = email.lower().strip()
+            
+            response = self.supabase.table('influencers')\
+                .select('*')\
+                .ilike('email', clean_email)\
+                .limit(1)\
+                .execute()
+            
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            else:
+                return None
+                
+        except Exception as e:
+            print(f"❌ Database error getting user by email: {e}")
+            return None
+
+    def store_chat_interaction(self, interaction_data):
+        """Store chat interaction for analytics"""
+        try:
+            response = self.supabase.table('chat_interactions')\
+                .insert(interaction_data)\
+                .execute()
+            
+            if response.data:
+                print(f"✅ Chat interaction stored: {interaction_data['session_id']}")
+                return response.data[0]
+            else:
+                print("❌ Failed to store chat interaction")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Database error storing chat interaction: {e}")
+            return None
+
+    def get_affiliate_links(self, influencer_id: str) -> List[Dict]:
+        """Get all affiliate links for an influencer"""
+        try:
+            response = self.supabase.table('affiliate_links') \
+                .select('*') \
+                .eq('influencer_id', influencer_id) \
+                .eq('is_active', True) \
+                .execute()
+            
+            return response.data if response.data else []
+        except Exception as e:
+            logger.error(f"Error getting affiliate links: {e}")
+            return []
+
+    def get_affiliate_link_by_platform(self, influencer_id: str, platform: str) -> Optional[Dict]:
+        """Get a specific affiliate link by platform"""
+        try:
+            response = self.supabase.table('affiliate_links') \
+                .select('*') \
+                .eq('influencer_id', influencer_id) \
+                .eq('platform', platform) \
+                .limit(1) \
+                .execute()
+            
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error getting affiliate link by platform: {e}")
+            return None
+
+    def create_affiliate_link(self, affiliate_data: Dict) -> bool:
+        """Create a new affiliate link"""
+        try:
+            # Ensure ID is a string (not UUID object)
+            if 'id' in affiliate_data:
+                affiliate_data['id'] = str(affiliate_data['id'])
+            
+            # Ensure influencer_id is a string
+            if 'influencer_id' in affiliate_data:
+                affiliate_data['influencer_id'] = str(affiliate_data['influencer_id'])
+            
+            response = self.supabase.table('affiliate_links') \
+                .insert(affiliate_data) \
+                .execute()
+            
+            return bool(response.data)
+        except Exception as e:
+            logger.error(f"Error creating affiliate link: {e}")
+            print(f"Affiliate data causing error: {affiliate_data}")  # Debug info
+            return False
+
+    def update_affiliate_link(self, influencer_id: str, platform: str, update_data: Dict) -> bool:
+        """Update an affiliate link"""
+        try:
+            response = self.supabase.table('affiliate_links') \
+                .update(update_data) \
+                .eq('influencer_id', str(influencer_id)) \
+                .eq('platform', platform) \
+                .execute()
+            
+            return bool(response.data)
+        except Exception as e:
+            logger.error(f"Error updating affiliate link: {e}")
+            return False
+
+    def delete_affiliate_link(self, influencer_id: str, platform: str) -> bool:
+        """Delete an affiliate link"""
+        try:
+            response = self.supabase.table('affiliate_links') \
+                .delete() \
+                .eq('influencer_id', str(influencer_id)) \
+                .eq('platform', platform) \
+                .execute()
+            
+            return bool(response.data)
+        except Exception as e:
+            logger.error(f"Error deleting affiliate link: {e}")
+            return False
