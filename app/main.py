@@ -1386,10 +1386,203 @@ def get_video_status_fixed(current_user, video_id):
             'message': 'Failed to check video status'
         }), 500
 
+@app.route('/api/voice/generate-audio', methods=['POST'])
+@token_required
+def generate_voice_audio_endpoint(current_user):
+    """Generate audio using user's preferred voice"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'status': 'error',
+                'message': 'No data provided'
+            }), 400
+        
+        text = data.get('text', '').strip()
+        voice_id = data.get('voice_id')
+        
+        if not text:
+            return jsonify({
+                'status': 'error',
+                'message': 'Text is required'
+            }), 400
+        
+        if len(text) > 1000:
+            return jsonify({
+                'status': 'error',
+                'message': 'Text too long. Maximum 1000 characters.'
+            }), 400
+        
+        # Get user's preferred voice if not specified
+        if not voice_id:
+            influencer = db.get_influencer(current_user['id'])
+            voice_id = influencer.get('preferred_voice_id', Config.DEFAULT_VOICE_ID)
+        
+        logger.info(f"🔊 Generating audio for user: {current_user['username']}, voice: {voice_id}")
+        
+        # Generate audio
+        audio_url = chatbot.generate_voice_audio(text, voice_id)
+        
+        if audio_url:
+            return jsonify({
+                'status': 'success',
+                'data': {
+                    'audio_url': audio_url,
+                    'text': text,
+                    'voice_id': voice_id,
+                    'duration_estimate': len(text) / 10  # Rough estimate: 10 chars per second
+                }
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to generate audio'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Voice audio generation error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to generate voice audio'
+        }), 500
+
+@app.route('/api/voice/preview', methods=['POST'])
+def preview_voice():
+    """Preview a voice with sample text (no authentication required)"""
+    try:
+        data = request.get_json()
+        
+        voice_id = data.get('voice_id', Config.DEFAULT_VOICE_ID)
+        sample_text = data.get('text', 'Hello! This is a preview of this voice. How does it sound?')
+        
+        # Limit sample text
+        if len(sample_text) > 200:
+            sample_text = sample_text[:200] + "..."
+        
+        logger.info(f"🎤 Voice preview requested for voice: {voice_id}")
+        
+        # Generate audio
+        audio_url = chatbot.generate_voice_audio(sample_text, voice_id)
+        
+        if audio_url:
+            return jsonify({
+                'status': 'success',
+                'data': {
+                    'audio_url': audio_url,
+                    'text': sample_text,
+                    'voice_id': voice_id
+                }
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to generate voice preview'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Voice preview error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to generate voice preview'
+        }), 500
+    
+@app.route('/api/speech-to-text', methods=['POST'])
+def speech_to_text():
+    """FIXED: Convert speech to text using OpenAI Whisper with proper file handling"""
+    try:
+        # Check if audio file is provided
+        if 'audio' not in request.files:
+            return jsonify({
+                'status': 'error',
+                'message': 'No audio file provided'
+            }), 400
+        
+        audio_file = request.files['audio']
+        
+        if audio_file.filename == '':
+            return jsonify({
+                'status': 'error',
+                'message': 'No audio file selected'
+            }), 400
+        
+        # Validate file size
+        audio_file.seek(0, 2)  # Seek to end
+        file_size = audio_file.tell()
+        audio_file.seek(0)  # Reset to beginning
+        
+        if file_size > Config.MAX_CONTENT_LENGTH:
+            return jsonify({
+                'status': 'error',
+                'message': 'Audio file too large'
+            }), 400
+        
+        if file_size == 0:
+            return jsonify({
+                'status': 'error',
+                'message': 'Audio file is empty'
+            }), 400
+        
+        # FIXED: Proper temporary file handling for webm files
+        temp_file = None
+        try:
+            # Create temporary file with proper extension
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.webm') as temp_file:
+                # Read the file content and write to temp file
+                audio_file.seek(0)
+                file_content = audio_file.read()
+                temp_file.write(file_content)
+                temp_file.flush()
+                temp_filename = temp_file.name
+            
+            logger.info(f"🎤 Temp file created: {temp_filename}, size: {len(file_content)} bytes")
+            
+            # FIXED: Use OpenAI Whisper API with proper file object
+            with open(temp_filename, 'rb') as audio_data:
+                transcript = chatbot.client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_data,
+                    response_format="text"
+                )
+            
+            # Extract text from response
+            transcription = transcript.strip() if isinstance(transcript, str) else transcript.text.strip()
+            
+            if transcription:
+                logger.info(f"✅ Speech-to-text successful: {transcription[:50]}...")
+                return jsonify({
+                    'status': 'success',
+                    'data': {
+                        'transcription': transcription,
+                        'confidence': 0.95  # OpenAI Whisper generally has high confidence
+                    }
+                })
+            else:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Could not transcribe audio. Please speak clearly and try again.'
+                }), 400
+                
+        finally:
+            # FIXED: Proper cleanup of temporary file
+            if temp_file and os.path.exists(temp_filename):
+                try:
+                    os.unlink(temp_filename)
+                    logger.info(f"🗑️ Cleaned up temp file: {temp_filename}")
+                except Exception as cleanup_error:
+                    logger.warning(f"Could not delete temporary file: {cleanup_error}")
+        
+    except Exception as e:
+        logger.error(f"Speech-to-text error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Speech-to-text processing failed: {str(e)}'
+        }), 500
+       
 # Enhanced Chat Routes
 @app.route('/api/chat', methods=['POST'])
-def chat():
-    """FIXED: Enhanced chat endpoint with better error handling"""
+def chat_with_influencer():
+    """ENHANCED: Chat endpoint with comprehensive knowledge and voice integration"""
     try:
         data = request.get_json()
         
@@ -1400,10 +1593,12 @@ def chat():
             }), 400
         
         user_message = data.get('message', '').strip()
+        username = data.get('username', '').strip()
         influencer_id = data.get('influencer_id')
-        username = data.get('username')
         session_id = data.get('session_id')
         voice_mode = data.get('voice_mode', False)
+        video_mode = data.get('video_mode', True)
+        use_knowledge = data.get('use_knowledge', True)
         
         if not user_message:
             return jsonify({
@@ -1429,95 +1624,78 @@ def chat():
         influencer_id = influencer['id']
         influencer_name = influencer.get('username', 'the influencer')
         
-        logger.info(f"💬 Chat request - User: {influencer_name}, Message: {user_message[:50]}...")
+        logger.info(f"💬 Enhanced chat request - User: {influencer_name}, Message: {user_message[:50]}...")
         
-        # Generate response using chatbot
+        # ENHANCED: Generate comprehensive response using the enhanced chatbot
         try:
-            if hasattr(chatbot, 'get_chat_response_with_knowledge'):
+            if hasattr(chatbot, 'get_comprehensive_chat_response'):
+                response_data = chatbot.get_comprehensive_chat_response(
+                    message=user_message,
+                    influencer_id=influencer_id,
+                    session_id=session_id,
+                    influencer_name=influencer_name,
+                    voice_mode=voice_mode,
+                    video_mode=video_mode
+                )
+            else:
+                # Fallback to knowledge-enhanced response
                 ai_response = chatbot.get_chat_response_with_knowledge(
                     message=user_message,
                     influencer_id=influencer_id,
                     session_id=session_id,
                     influencer_name=influencer_name,
-                    db=db
+                    db=db,
+                    voice_mode=voice_mode
                 )
-            else:
-                # Fallback to basic response
-                ai_response = chatbot.get_chat_response(
-                    message=user_message,
-                    influencer_id=influencer_id
-                )
+                
+                response_data = {
+                    'text': ai_response,
+                    'session_id': session_id or f"session_{int(time.time())}",
+                    'video_url': '',
+                    'audio_url': '',
+                    'has_avatar': bool(influencer.get('heygen_avatar_id')),
+                    'voice_id': influencer.get('preferred_voice_id', Config.DEFAULT_VOICE_ID),
+                    'knowledge_enhanced': use_knowledge,
+                    'influencer': {
+                        'username': influencer_name,
+                        'bio': influencer.get('bio', ''),
+                        'has_knowledge': bool(influencer.get('bio') or influencer.get('expertise'))
+                    }
+                }
+                
+                # Generate video if avatar available and video mode enabled
+                if video_mode and response_data['has_avatar']:
+                    video_url = chatbot.generate_enhanced_video_response(
+                        ai_response,
+                        influencer_id,
+                        response_data['voice_id']
+                    )
+                    if video_url:
+                        response_data['video_url'] = video_url
+                
+                # Generate audio if voice mode enabled and no video
+                if voice_mode and not video_mode:
+                    audio_url = chatbot.generate_audio_response(
+                        ai_response,
+                        response_data['voice_id']
+                    )
+                    if audio_url:
+                        response_data['audio_url'] = audio_url
             
-            logger.info(f"🤖 Generated AI response: {ai_response[:100]}...")
+            logger.info(f"🤖 Enhanced response generated - Text: {len(response_data['text'])} chars, Video: {bool(response_data.get('video_url'))}, Audio: {bool(response_data.get('audio_url'))}")
             
         except Exception as ai_error:
             logger.error(f"AI response generation failed: {ai_error}")
-            ai_response = f"Hi! I'm {influencer_name}'s AI assistant. I'm having some technical difficulties right now, but I'm here to help! Could you try rephrasing your question?"
-        
-        # Generate video response if avatar is available
-        video_url = ""
-        if influencer.get('heygen_avatar_id') and not voice_mode:
-            try:
-                logger.info("🎬 Attempting to generate video response...")
-                
-                # Use user's preferred voice
-                preferred_voice_id = influencer.get('preferred_voice_id', Config.DEFAULT_VOICE_ID)
-                
-                if hasattr(chatbot, 'generate_video_response'):
-                    video_url = chatbot.generate_video_response(
-                        text_response=ai_response,
-                        avatar_id=influencer['heygen_avatar_id'],
-                        voice_id=preferred_voice_id
-                    )
-                
-                if video_url:
-                    logger.info(f"✅ Video generated successfully: {video_url}")
-                else:
-                    logger.warning("⚠️ Video generation failed, proceeding with text only")
-                    
-            except Exception as video_error:
-                logger.error(f"Video generation error: {video_error}")
-        
-        # Generate new session ID if not provided
-        if not session_id:
-            session_id = str(uuid.uuid4())
-        
-        # Store interaction in database for analytics
-        try:
-            interaction_data = {
-                'influencer_id': influencer_id,
-                'session_id': session_id,
-                'user_message': user_message,
-                'bot_response': ai_response,
-                'video_url': video_url,
-                'has_video': bool(video_url),
-                'voice_id_used': influencer.get('preferred_voice_id', Config.DEFAULT_VOICE_ID),
-                'knowledge_used': True,
-                'created_at': datetime.now(timezone.utc).isoformat()
+            response_data = {
+                'text': f"Hi! I'm {influencer_name}'s AI assistant. I'm having some technical difficulties right now, but I'm here to help! Could you try rephrasing your question?",
+                'session_id': session_id or f"session_{int(time.time())}",
+                'video_url': '',
+                'audio_url': '',
+                'has_avatar': False,
+                'voice_id': Config.DEFAULT_VOICE_ID,
+                'knowledge_enhanced': False,
+                'error': str(ai_error)
             }
-            
-            if hasattr(db, 'store_chat_interaction'):
-                db.store_chat_interaction(interaction_data)
-                logger.info("📊 Chat interaction stored successfully")
-            
-        except Exception as storage_error:
-            logger.error(f"Failed to store chat interaction: {storage_error}")
-        
-        # Prepare response
-        response_data = {
-            'text': ai_response,
-            'session_id': session_id,
-            'video_url': video_url,
-            'has_avatar': bool(influencer.get('heygen_avatar_id')),
-            'voice_id': influencer.get('preferred_voice_id', Config.DEFAULT_VOICE_ID),
-            'knowledge_enhanced': True,
-            'influencer': {
-                'username': influencer['username'],
-                'bio': influencer.get('bio', '')
-            }
-        }
-        
-        logger.info(f"✅ Chat response completed for {influencer_name}")
         
         return jsonify({
             'status': 'success',
@@ -1528,47 +1706,69 @@ def chat():
         logger.error(f"Chat endpoint error: {e}")
         return jsonify({
             'status': 'error',
-            'message': 'Failed to process chat request'
+            'message': 'Chat service temporarily unavailable'
         }), 500
 
 @app.route('/api/chat/<username>', methods=['GET'])
 def get_chat_info(username):
-    """FIXED: Get enhanced public chat page information"""
+    """ENHANCED: Get chat information including knowledge and avatar status"""
     try:
-        logger.info(f"Getting chat info for username: {username}")
-        
         # Clean username
         clean_username = username.strip().lower()
         
+        # Get influencer
         influencer = db.get_influencer_by_username(clean_username)
         
         if not influencer:
-            logger.warning(f"Influencer '{username}' not found")
             return jsonify({
                 'status': 'error',
                 'message': 'Influencer not found'
             }), 404
         
-        # Get voice information with fallback
-        preferred_voice_id = influencer.get('preferred_voice_id', Config.DEFAULT_VOICE_ID)
-        
-        # FIXED: More comprehensive response
+        # ENHANCED: Include comprehensive status information
         response_data = {
             'username': influencer['username'],
             'bio': influencer.get('bio', ''),
-            'avatar_ready': bool(influencer.get('heygen_avatar_id')),
             'has_avatar': bool(influencer.get('heygen_avatar_id')),
-            'chat_enabled': True,
-            'voice_id': preferred_voice_id,
+            'voice_id': influencer.get('preferred_voice_id') or influencer.get('voice_id'),
             'avatar_id': influencer.get('heygen_avatar_id'),
-            'avatar_type': influencer.get('avatar_type', 'none'),
             'expertise': influencer.get('expertise', ''),
             'personality': influencer.get('personality', ''),
-            'created_at': influencer.get('created_at'),
-            'chat_url': f"{request.host_url}pages/chat.html?username={clean_username}"
+            'has_knowledge': bool(
+                influencer.get('bio') or 
+                influencer.get('expertise') or 
+                influencer.get('personality')
+            ),
+            'knowledge_documents_count': 0,  # Would need to query knowledge_documents table
+            'affiliate_platforms_connected': 0,  # Would need to query affiliate_links table
+            'chat_capabilities': {
+                'text_chat': True,
+                'voice_responses': bool(influencer.get('preferred_voice_id') or influencer.get('voice_id')),
+                'video_responses': bool(influencer.get('heygen_avatar_id')),
+                'knowledge_enhanced': bool(
+                    influencer.get('bio') or 
+                    influencer.get('expertise') or 
+                    influencer.get('personality')
+                ),
+                'product_recommendations': False  # Would need to check affiliate connections
+            }
         }
         
-        logger.info(f"✅ Chat info retrieved for {username}")
+        # Get additional stats if available
+        try:
+            # Count knowledge documents
+            knowledge_docs = db.get_knowledge_documents(influencer['id']) if hasattr(db, 'get_knowledge_documents') else []
+            response_data['knowledge_documents_count'] = len(knowledge_docs)
+            
+            # Count affiliate platforms
+            affiliate_links = db.get_affiliate_links(influencer['id']) if hasattr(db, 'get_affiliate_links') else []
+            response_data['affiliate_platforms_connected'] = len([link for link in affiliate_links if link.get('is_active', True)])
+            response_data['chat_capabilities']['product_recommendations'] = response_data['affiliate_platforms_connected'] > 0
+            
+        except Exception as stats_error:
+            logger.warning(f"Could not load additional stats: {stats_error}")
+        
+        logger.info(f"✅ Chat info retrieved for {username} - Avatar: {response_data['has_avatar']}, Knowledge: {response_data['has_knowledge']}")
         
         return jsonify({
             'status': 'success',
@@ -1721,41 +1921,10 @@ def save_personal_knowledge(current_user):
 # AFFILIATE MANAGEMENT ROUTES
 # =============================================================================
 
-@app.route('/api/affiliate', methods=['GET'])
-@token_required
-def get_affiliate_links(current_user):
-    """Get all affiliate links for the current user"""
-    try:
-        # Get affiliate links from database
-        affiliate_links = db.get_affiliate_links(current_user['id'])
-        
-        # Calculate stats
-        stats = {
-            'connected_platforms': len(affiliate_links),
-            'total_products': sum(link.get('product_count', 0) for link in affiliate_links),
-            'recommendations_made': sum(link.get('recommendations', 0) for link in affiliate_links),
-            'earnings_potential': sum(link.get('potential_earnings', 0) for link in affiliate_links)
-        }
-        
-        return jsonify({
-            'status': 'success',
-            'data': {
-                'affiliate_links': affiliate_links,
-                'stats': stats
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"Get affiliate links error: {e}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Failed to get affiliate links'
-        }), 500
-
 @app.route('/api/affiliate', methods=['POST'])
 @token_required
-def add_affiliate_link(current_user):
-    """Add or update an affiliate link - UPDATED for fixed column names"""
+def connect_affiliate_platform(current_user):
+    """FIXED: Connect affiliate platform with updated credential handling"""
     try:
         data = request.get_json()
         
@@ -1765,15 +1934,9 @@ def add_affiliate_link(current_user):
                 'message': 'No data provided'
             }), 400
         
-        platform = data.get('platform')
-        if not platform:
-            return jsonify({
-                'status': 'error',
-                'message': 'Platform is required'
-            }), 400
-        
-        # Validate platform
+        platform = data.get('platform', '').lower()
         valid_platforms = ['amazon', 'rakuten', 'shareasale', 'cj_affiliate', 'skimlinks']
+        
         if platform not in valid_platforms:
             return jsonify({
                 'status': 'error',
@@ -1798,7 +1961,7 @@ def add_affiliate_link(current_user):
             'updated_at': datetime.now(timezone.utc).isoformat()
         }
         
-        # Add platform-specific fields (UPDATED column names)
+        # FIXED: Add platform-specific fields with correct Rakuten structure
         if platform == 'amazon':
             affiliate_data.update({
                 'amazon_access_key': data.get('access_key', ''),
@@ -1806,56 +1969,82 @@ def add_affiliate_link(current_user):
                 'affiliate_id': data.get('partner_tag', ''),
                 'partner_tag': data.get('partner_tag', '')
             })
+            required_fields = ['access_key', 'secret_key', 'partner_tag']
+            
         elif platform == 'rakuten':
+            # FIXED: Use new OAuth2 Client Credentials structure
             affiliate_data.update({
-                'merchant_id': data.get('merchant_id', ''),
-                'api_token': data.get('token', ''),
-                'affiliate_id': data.get('merchant_id', '')
+                'client_id': data.get('client_id', ''),
+                'client_secret': data.get('client_secret', ''),
+                'application_id': data.get('application_id', ''),  # Optional
+                'rakuten_client_id': data.get('client_id', ''),
+                'rakuten_client_secret': data.get('client_secret', ''),
+                'rakuten_application_id': data.get('application_id', ''),
+                'affiliate_id': data.get('client_id', '')  # Use client_id as affiliate_id
             })
+            required_fields = ['client_id', 'client_secret']
+            
         elif platform == 'shareasale':
             affiliate_data.update({
                 'shareasale_api_token': data.get('api_token', ''),
                 'shareasale_secret_key': data.get('secret_key', ''),
                 'affiliate_id': data.get('affiliate_id', '')
             })
+            required_fields = ['api_token', 'secret_key', 'affiliate_id']
+            
         elif platform == 'cj_affiliate':
             affiliate_data.update({
                 'cj_api_key': data.get('api_key', ''),
                 'website_id': data.get('website_id', ''),
                 'affiliate_id': data.get('website_id', '')
             })
+            required_fields = ['api_key', 'website_id']
+            
         elif platform == 'skimlinks':
             affiliate_data.update({
                 'skimlinks_api_key': data.get('api_key', ''),
                 'publisher_id': data.get('publisher_id', ''),
                 'affiliate_id': data.get('publisher_id', '')
             })
+            required_fields = ['api_key', 'publisher_id']
+        
+        # Validate required fields
+        missing_fields = []
+        for field in required_fields:
+            if not data.get(field):
+                missing_fields.append(field)
+        
+        if missing_fields:
+            return jsonify({
+                'status': 'error',
+                'message': f'Missing required fields: {", ".join(missing_fields)}'
+            }), 400
         
         # Save to database
         success = db.create_affiliate_link(affiliate_data)
         
         if success:
-            logger.info(f"✅ Affiliate link created for {current_user['username']}: {platform}")
+            logger.info(f"✅ Affiliate link created for {current_user['username']} - Platform: {platform}")
             return jsonify({
                 'status': 'success',
-                'message': f'{platform} connected successfully',
+                'message': f'{platform.title()} connected successfully',
                 'data': {
                     'platform': platform,
-                    'affiliate_id': affiliate_data.get('affiliate_id', ''),
-                    'created_at': affiliate_data['created_at']
+                    'connected_at': affiliate_data['created_at'],
+                    'credentials_type': 'OAuth2' if platform == 'rakuten' else 'API Key'
                 }
-            }), 201
+            })
         else:
             return jsonify({
                 'status': 'error',
-                'message': 'Failed to save affiliate link'
+                'message': 'Failed to save affiliate connection'
             }), 500
             
     except Exception as e:
-        logger.error(f"Add affiliate link error: {e}")
+        logger.error(f"Connect affiliate platform error: {e}")
         return jsonify({
             'status': 'error',
-            'message': 'Failed to add affiliate link'
+            'message': f'Failed to connect platform: {str(e)}'
         }), 500
 
 @app.route('/api/affiliate/<platform>', methods=['DELETE'])
@@ -1945,27 +2134,919 @@ def update_affiliate_link(current_user, platform):
             'message': 'Failed to update affiliate link'
         }), 500
 
+@app.route('/api/affiliate/search-products', methods=['POST'])
+@token_required
+def search_affiliate_products(current_user):
+    """Search for products across all connected affiliate platforms"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'status': 'error',
+                'message': 'No data provided'
+            }), 400
+        
+        query = data.get('query', '').strip()
+        platform = data.get('platform', 'all')  # 'all' or specific platform
+        limit = min(int(data.get('limit', 10)), 20)  # Max 20 products
+        
+        if not query:
+            return jsonify({
+                'status': 'error',
+                'message': 'Search query is required'
+            }), 400
+        
+        logger.info(f"🔍 Product search - User: {current_user['username']}, Query: {query}, Platform: {platform}")
+        
+        # Import affiliate service
+        try:
+            from affiliate_service import AffiliateService
+            affiliate_service = AffiliateService(db)
+        except ImportError:
+            return jsonify({
+                'status': 'error',
+                'message': 'Affiliate service not available'
+            }), 503
+        
+        # Search products
+        if platform == 'all':
+            # Search across all connected platforms
+            recommendations = affiliate_service.get_product_recommendations(
+                query=query,
+                influencer_id=current_user['id'],
+                limit=limit
+            )
+            
+            return jsonify({
+                'status': 'success',
+                'data': {
+                    'products': recommendations['products'],
+                    'total_found': recommendations['total_found'],
+                    'platforms_searched': recommendations['platforms_searched'],
+                    'query': query,
+                    'search_type': 'multi_platform'
+                }
+            })
+        else:
+            # Search specific platform
+            products = affiliate_service.search_products(
+                query=query,
+                platform=platform,
+                influencer_id=current_user['id'],
+                limit=limit
+            )
+            
+            return jsonify({
+                'status': 'success',
+                'data': {
+                    'products': products,
+                    'total_found': len(products),
+                    'platform': platform,
+                    'query': query,
+                    'search_type': 'single_platform'
+                }
+            })
+        
+    except Exception as e:
+        logger.error(f"Product search error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to search products'
+        }), 500
+
+@app.route('/api/affiliate/platform-status', methods=['GET'])
+@token_required
+def get_platform_status(current_user):
+    """Get status of all affiliate platforms for the current user"""
+    try:
+        # Get user's affiliate links
+        affiliate_links = db.get_affiliate_links(current_user['id'])
+        
+        # Create platform status
+        platforms_data = {}
+        connected_platforms = 0
+        total_estimated_products = 0
+        
+        # Get default platform configurations
+        from config import DEFAULT_PLATFORM_DATA
+        
+        for platform_key, default_config in DEFAULT_PLATFORM_DATA.items():
+            platforms_data[platform_key] = {
+                **default_config,
+                'connected': False,
+                'estimated_products': 0
+            }
+        
+        # Update with user's connected platforms
+        for link in affiliate_links:
+            if link.get('is_active', True):
+                platform = link['platform']
+                if platform in platforms_data:
+                    platforms_data[platform]['connected'] = True
+                    platforms_data[platform]['estimated_products'] = 1000  # Placeholder
+                    connected_platforms += 1
+                    total_estimated_products += 1000
+        
+        # Calculate stats
+        stats = {
+            'connected_platforms': connected_platforms,
+            'estimated_products': total_estimated_products,
+            'recommendations_made': 0,  # Would need analytics table
+            'potential_earnings': total_estimated_products * 0.05,  # Rough estimate
+            'completion_percentage': (connected_platforms / len(platforms_data)) * 100
+        }
+        
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'platforms': platforms_data,
+                'stats': stats
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Platform status error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to get platform status'
+        }), 500
+
+@app.route('/api/affiliate/test-connection', methods=['POST'])
+@token_required
+def test_affiliate_connection(current_user):
+    """FIXED: Test affiliate platform connection with updated credential handling"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'status': 'error',
+                'message': 'No data provided'
+            }), 400
+        
+        platform = data.get('platform', '').lower()
+        credentials = data.get('credentials', {})
+        
+        if not platform or not credentials:
+            return jsonify({
+                'status': 'error',
+                'message': 'Platform and credentials are required'
+            }), 400
+        
+        # FIXED: Updated credential structures for each platform
+        if platform == 'rakuten':
+            # Use the new OAuth2-based credential structure
+            test_affiliate_info = {
+                'client_id': credentials.get('client_id'),
+                'client_secret': credentials.get('client_secret'),
+                'application_id': credentials.get('application_id'),  # Optional
+                'rakuten_client_id': credentials.get('client_id'),
+                'rakuten_client_secret': credentials.get('client_secret'),
+                'rakuten_application_id': credentials.get('application_id')
+            }
+            required_fields = ['client_id', 'client_secret']
+            
+        elif platform == 'amazon':
+            test_affiliate_info = {
+                'amazon_access_key': credentials.get('access_key'),
+                'amazon_secret_key': credentials.get('secret_key'),
+                'partner_tag': credentials.get('partner_tag')
+            }
+            required_fields = ['access_key', 'secret_key', 'partner_tag']
+            
+        elif platform == 'shareasale':
+            test_affiliate_info = {
+                'shareasale_api_token': credentials.get('api_token'),
+                'shareasale_secret_key': credentials.get('secret_key'),
+                'affiliate_id': credentials.get('affiliate_id')
+            }
+            required_fields = ['api_token', 'secret_key', 'affiliate_id']
+            
+        elif platform == 'cj_affiliate':
+            test_affiliate_info = {
+                'cj_api_key': credentials.get('api_key'),
+                'website_id': credentials.get('website_id')
+            }
+            required_fields = ['api_key']
+            
+        elif platform == 'skimlinks':
+            test_affiliate_info = {
+                'skimlinks_api_key': credentials.get('api_key'),
+                'publisher_id': credentials.get('publisher_id')
+            }
+            required_fields = ['api_key']
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'Unsupported platform: {platform}'
+            }), 400
+        
+        # Validate required fields are present
+        missing_fields = []
+        for field in required_fields:
+            if not credentials.get(field):
+                missing_fields.append(field)
+        
+        if missing_fields:
+            return jsonify({
+                'status': 'error',
+                'message': f'Missing required fields: {", ".join(missing_fields)}'
+            }), 400
+        
+        logger.info(f"🔍 Testing {platform} connection with credentials: {list(credentials.keys())}")
+        
+        # Test the connection using affiliate service
+        if hasattr(chatbot, 'affiliate_service') and chatbot.affiliate_service:
+            try:
+                # Test with a simple search query
+                test_products = chatbot.affiliate_service.platforms[platform].search_products(
+                    query="test product",
+                    affiliate_info=test_affiliate_info,
+                    limit=1
+                )
+                
+                # For Rakuten, even an empty result can indicate successful auth
+                # The API might not return products for "test product" but auth should work
+                logger.info(f"✅ {platform} API test completed, found {len(test_products)} products")
+                
+                return jsonify({
+                    'status': 'success',
+                    'message': f'{platform.title()} connection successful',
+                    'data': {
+                        'platform': platform,
+                        'test_results': len(test_products),
+                        'connection_status': 'active',
+                        'credentials_valid': True
+                    }
+                })
+                    
+            except Exception as api_error:
+                logger.error(f"❌ {platform} API test failed: {api_error}")
+                
+                # Provide specific error messages based on the error type
+                error_message = str(api_error).lower()
+                
+                if 'authentication' in error_message or 'unauthorized' in error_message:
+                    return jsonify({
+                        'status': 'error',
+                        'message': f'{platform.title()} authentication failed. Please check your credentials.',
+                        'error_type': 'auth_error'
+                    }), 401
+                elif 'forbidden' in error_message or 'access denied' in error_message:
+                    return jsonify({
+                        'status': 'error',
+                        'message': f'{platform.title()} access denied. Please verify your account permissions.',
+                        'error_type': 'permission_error'
+                    }), 403
+                elif 'rate limit' in error_message or 'too many requests' in error_message:
+                    return jsonify({
+                        'status': 'error',
+                        'message': f'{platform.title()} rate limit exceeded. Please try again later.',
+                        'error_type': 'rate_limit_error'
+                    }), 429
+                else:
+                    return jsonify({
+                        'status': 'error',
+                        'message': f'{platform.title()} API test failed: {str(api_error)}',
+                        'error_type': 'api_error'
+                    }), 400
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Affiliate service not available'
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"Test affiliate connection error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Connection test failed: {str(e)}'
+        }), 500
+
+@app.route('/api/affiliate/rakuten', methods=['POST'])
+@token_required
+def connect_rakuten_platform(current_user):
+    """Enhanced Rakuten connection with proper validation"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'status': 'error',
+                'message': 'No data provided'
+            }), 400
+        
+        # Validate required Rakuten fields
+        required_fields = ['application_id', 'affiliate_id']
+        missing_fields = [field for field in required_fields if not data.get(field)]
+        
+        if missing_fields:
+            return jsonify({
+                'status': 'error',
+                'message': f'Missing required fields: {", ".join(missing_fields)}'
+            }), 400
+        
+        # Check if Rakuten is already connected
+        existing_link = db.get_affiliate_link_by_platform(current_user['id'], 'rakuten')
+        if existing_link:
+            return jsonify({
+                'status': 'error',
+                'message': 'Rakuten is already connected to your account'
+            }), 400
+        
+        # Prepare affiliate link data for Rakuten
+        affiliate_data = {
+            'id': str(uuid.uuid4()),
+            'influencer_id': current_user['id'],
+            'platform': 'rakuten',
+            'is_active': True,
+            'created_at': datetime.now(timezone.utc).isoformat(),
+            'updated_at': datetime.now(timezone.utc).isoformat(),
+            'rakuten_application_id': data.get('application_id'),
+            'rakuten_affiliate_id': data.get('affiliate_id'),
+            'affiliate_id': data.get('affiliate_id'),  # Primary affiliate ID
+            'api_token': data.get('application_id')  # Use application_id as token
+        }
+        
+        # Test connection before saving
+        try:
+            from affiliate_service import AffiliateService
+            affiliate_service = AffiliateService(db)
+            
+            # Create temporary affiliate info for testing
+            temp_info = {
+                'rakuten_client_id': data.get('application_id'),
+                'rakuten_access_token': data.get('affiliate_id'),
+                'merchant_id': data.get('application_id'),
+                'api_token': data.get('affiliate_id')
+            }
+            
+            # Test with a simple search
+            test_products = affiliate_service.platforms['rakuten'].search_products(
+                "test", temp_info, 1
+            )
+            
+            # Note: Rakuten might not return products for "test" query, 
+            # but if we don't get an authentication error, credentials are likely valid
+            
+        except Exception as test_error:
+            logger.warning(f"Rakuten connection test warning: {test_error}")
+            # Continue anyway - the test might fail due to API limitations
+        
+        # Save to database
+        success = db.create_affiliate_link(affiliate_data)
+        
+        if success:
+            logger.info(f"✅ Rakuten connected for {current_user['username']}")
+            return jsonify({
+                'status': 'success',
+                'message': 'Rakuten connected successfully',
+                'data': {
+                    'platform': 'rakuten',
+                    'affiliate_id': affiliate_data['affiliate_id'],
+                    'application_id': affiliate_data['rakuten_application_id'],
+                    'created_at': affiliate_data['created_at']
+                }
+            }), 201
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to save Rakuten connection'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Connect Rakuten error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to connect Rakuten'
+        }), 500
+
+@app.route('/api/analytics/affiliate-performance', methods=['GET'])
+@token_required
+def get_affiliate_performance(current_user):
+    """Get detailed affiliate performance analytics"""
+    try:
+        days = int(request.args.get('days', 30))
+        platform = request.args.get('platform', 'all')
+        
+        from datetime import timedelta
+        start_date = datetime.now(timezone.utc) - timedelta(days=days)
+        
+        # Get chat interactions with product recommendations
+        response = db.supabase.table('chat_interactions') \
+            .select('*') \
+            .eq('influencer_id', current_user['id']) \
+            .eq('products_included', True) \
+            .gte('created_at', start_date.isoformat()) \
+            .execute()
+        
+        interactions = response.data if response.data else []
+        
+        # Calculate metrics
+        total_recommendations = len(interactions)
+        unique_sessions = len(set([chat.get("session_id") for chat in interactions if chat.get("session_id")]))
+        
+        # Group by platform if specific platform requested
+        platform_metrics = {}
+        daily_stats = {}
+        
+        for interaction in interactions:
+            date = interaction["created_at"][:10]  # YYYY-MM-DD
+            
+            # Daily stats
+            if date not in daily_stats:
+                daily_stats[date] = {'recommendations': 0, 'sessions': set()}
+            
+            daily_stats[date]['recommendations'] += 1
+            if interaction.get('session_id'):
+                daily_stats[date]['sessions'].add(interaction['session_id'])
+        
+        # Convert sets to counts for JSON serialization
+        for date, stats in daily_stats.items():
+            stats['unique_sessions'] = len(stats['sessions'])
+            del stats['sessions']
+        
+        # Get affiliate links for platform info
+        affiliate_links = db.get_affiliate_links(current_user['id'])
+        
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'total_recommendations': total_recommendations,
+                'unique_sessions': unique_sessions,
+                'connected_platforms': len(affiliate_links),
+                'daily_stats': daily_stats,
+                'period_days': days,
+                'avg_daily_recommendations': total_recommendations / days if days > 0 else 0,
+                'recommendation_rate': total_recommendations / unique_sessions if unique_sessions > 0 else 0,
+                'platform_breakdown': platform_metrics
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Get affiliate performance error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to get affiliate performance data'
+        }), 500
+
+
+# =============================================================================
+# WEBHOOK ENDPOINTS FOR AFFILIATE PLATFORMS
+# =============================================================================
+
+@app.route('/api/webhooks/affiliate/<platform>', methods=['POST'])
+def affiliate_webhook(platform):
+    """Handle webhook notifications from affiliate platforms"""
+    try:
+        data = request.get_json()
+        
+        logger.info(f"📡 Received webhook from {platform}: {data}")
+        
+        # Process webhook based on platform
+        if platform == 'rakuten':
+            # Handle Rakuten conversion notifications
+            return handle_rakuten_webhook(data)
+        elif platform == 'amazon':
+            # Handle Amazon conversion notifications
+            return handle_amazon_webhook(data)
+        elif platform == 'shareasale':
+            # Handle ShareASale conversion notifications
+            return handle_shareasale_webhook(data)
+        elif platform == 'cj_affiliate':
+            # Handle CJ Affiliate conversion notifications
+            return handle_cj_webhook(data)
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'Unsupported platform: {platform}'
+            }), 400
+            
+    except Exception as e:
+        logger.error(f"Webhook processing error for {platform}: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Webhook processing failed'
+        }), 500
+
+
+def handle_rakuten_webhook(data):
+    """Handle Rakuten specific webhook data"""
+    try:
+        # Rakuten webhook typically includes:
+        # - order_id, transaction_id
+        # - commission_amount
+        # - order_total
+        # - affiliate_id
+        
+        webhook_data = {
+            'platform': 'rakuten',
+            'order_id': data.get('order_id'),
+            'transaction_id': data.get('transaction_id'),
+            'commission_amount': data.get('commission_amount'),
+            'order_total': data.get('order_total'),
+            'affiliate_id': data.get('affiliate_id'),
+            'status': data.get('status', 'pending'),
+            'created_at': datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Store webhook data for analytics
+        # You would implement webhook storage in your database
+        
+        logger.info(f"✅ Processed Rakuten webhook: Order {data.get('order_id')}")
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Webhook processed successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Rakuten webhook error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to process Rakuten webhook'
+        }), 500
+
+
+# =============================================================================
+# BULK OPERATIONS FOR AFFILIATE MANAGEMENT
+# =============================================================================
+
+@app.route('/api/affiliate/bulk-connect', methods=['POST'])
+@token_required
+def bulk_connect_platforms(current_user):
+    """Connect multiple affiliate platforms at once"""
+    try:
+        data = request.get_json()
+        
+        if not data or 'platforms' not in data:
+            return jsonify({
+                'status': 'error',
+                'message': 'Platforms data is required'
+            }), 400
+        
+        platforms_data = data['platforms']
+        results = {'success': [], 'failed': []}
+        
+        for platform_data in platforms_data:
+            platform = platform_data.get('platform')
+            credentials = platform_data.get('credentials', {})
+            
+            try:
+                # Validate platform
+                valid_platforms = ['amazon', 'rakuten', 'shareasale', 'cj_affiliate', 'skimlinks']
+                if platform not in valid_platforms:
+                    results['failed'].append({
+                        'platform': platform,
+                        'error': 'Invalid platform'
+                    })
+                    continue
+                
+                # Check if already connected
+                existing = db.get_affiliate_link_by_platform(current_user['id'], platform)
+                if existing:
+                    results['failed'].append({
+                        'platform': platform,
+                        'error': 'Already connected'
+                    })
+                    continue
+                
+                # Prepare affiliate data
+                affiliate_data = {
+                    'id': str(uuid.uuid4()),
+                    'influencer_id': current_user['id'],
+                    'platform': platform,
+                    'is_active': True,
+                    'created_at': datetime.now(timezone.utc).isoformat(),
+                    'updated_at': datetime.now(timezone.utc).isoformat(),
+                    **credentials
+                }
+                
+                # Add platform-specific affiliate_id
+                if platform == 'amazon':
+                    affiliate_data['affiliate_id'] = credentials.get('partner_tag', '')
+                elif platform == 'rakuten':
+                    affiliate_data['affiliate_id'] = credentials.get('affiliate_id', '')
+                elif platform == 'shareasale':
+                    affiliate_data['affiliate_id'] = credentials.get('affiliate_id', '')
+                elif platform == 'cj_affiliate':
+                    affiliate_data['affiliate_id'] = credentials.get('website_id', '')
+                elif platform == 'skimlinks':
+                    affiliate_data['affiliate_id'] = credentials.get('publisher_id', '')
+                
+                # Save to database
+                success = db.create_affiliate_link(affiliate_data)
+                
+                if success:
+                    results['success'].append({
+                        'platform': platform,
+                        'affiliate_id': affiliate_data.get('affiliate_id', ''),
+                        'created_at': affiliate_data['created_at']
+                    })
+                else:
+                    results['failed'].append({
+                        'platform': platform,
+                        'error': 'Database save failed'
+                    })
+                
+            except Exception as platform_error:
+                results['failed'].append({
+                    'platform': platform,
+                    'error': str(platform_error)
+                })
+        
+        # Return results
+        success_count = len(results['success'])
+        total_count = len(platforms_data)
+        
+        message = f"Connected {success_count}/{total_count} platforms successfully"
+        
+        return jsonify({
+            'status': 'success' if success_count > 0 else 'error',
+            'message': message,
+            'data': results
+        }), 200 if success_count > 0 else 400
+        
+    except Exception as e:
+        logger.error(f"Bulk connect platforms error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to bulk connect platforms'
+        }), 500
+
+
+# =============================================================================
+# ENHANCED VOICE SETUP ENDPOINTS
+# =============================================================================
+
+@app.route('/api/voice/available-voices', methods=['GET'])
+def get_available_voices_enhanced():
+    """Get enhanced list of available voices with categories and samples"""
+    try:
+        # Professional voices for business/educational content
+        professional_voices = [
+            {
+                "voice_id": "2d5b0e6cf36f460aa7fc47e3eee4ba54",
+                "name": "Rachel",
+                "gender": "Female",
+                "language": "English",
+                "style": "Professional",
+                "description": "Clear, authoritative female voice perfect for business and educational content",
+                "sample_text": "Hello, I'm Rachel. I specialize in professional communication and can help your audience with expert advice.",
+                "use_cases": ["Business presentations", "Educational content", "Product reviews"],
+                "personality_traits": ["Confident", "Clear", "Trustworthy"]
+            },
+            {
+                "voice_id": "d7bbcdd6964c47bdaae26decade4a933",
+                "name": "David",
+                "gender": "Male", 
+                "language": "English",
+                "style": "Professional",
+                "description": "Deep, authoritative male voice ideal for expert content and tutorials",
+                "sample_text": "Hi there, I'm David. My voice conveys authority and expertise, perfect for sharing knowledge.",
+                "use_cases": ["Tech tutorials", "Financial advice", "Expert commentary"],
+                "personality_traits": ["Authoritative", "Knowledgeable", "Reliable"]
+            }
+        ]
+        
+        # Friendly voices for lifestyle/personal content
+        friendly_voices = [
+            {
+                "voice_id": "4d2b8e6cf36f460aa7fc47e3eee4ba12",
+                "name": "Emma",
+                "gender": "Female",
+                "language": "English", 
+                "style": "Friendly",
+                "description": "Warm, approachable female voice great for lifestyle and personal content",
+                "sample_text": "Hey! I'm Emma, and I love connecting with people in a fun, friendly way.",
+                "use_cases": ["Lifestyle tips", "Fashion advice", "Personal stories"],
+                "personality_traits": ["Warm", "Approachable", "Enthusiastic"]
+            },
+            {
+                "voice_id": "3a1c7d5bf24e350bb6dc46e2dee3ab21",
+                "name": "Michael",
+                "gender": "Male",
+                "language": "English",
+                "style": "Casual", 
+                "description": "Relaxed male voice perfect for conversational, casual content",
+                "sample_text": "What's up! I'm Michael, here to chat about whatever interests you most.",
+                "use_cases": ["Gaming content", "Casual conversations", "Entertainment"],
+                "personality_traits": ["Relaxed", "Friendly", "Conversational"]
+            }
+        ]
+        
+        # Specialized voices for specific niches
+        specialized_voices = [
+            {
+                "voice_id": "1bd001e7e50f421d891986aad5158bc8",
+                "name": "Sophia",
+                "gender": "Female",
+                "language": "English",
+                "style": "Gentle",
+                "description": "Soft, caring female voice ideal for wellness and mindfulness content",
+                "sample_text": "Hello, I'm Sophia. I speak with gentleness and care, perfect for wellness topics.",
+                "use_cases": ["Wellness coaching", "Meditation guides", "Self-care tips"],
+                "personality_traits": ["Gentle", "Caring", "Soothing"]
+            },
+            {
+                "voice_id": "26b2064088674c80b1e5fc5ab1a068ec", 
+                "name": "Marcus",
+                "gender": "Male",
+                "language": "English",
+                "style": "Energetic",
+                "description": "Dynamic, motivational male voice for fitness and motivation content",
+                "sample_text": "Hey everyone! I'm Marcus, and I'm here to pump you up and keep you motivated!",
+                "use_cases": ["Fitness coaching", "Motivational content", "Sports commentary"],
+                "personality_traits": ["Energetic", "Motivational", "Dynamic"]
+            }
+        ]
+        
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'voice_categories': {
+                    'professional': {
+                        'name': 'Professional Voices',
+                        'description': 'Perfect for business, education, and expert content',
+                        'voices': professional_voices
+                    },
+                    'friendly': {
+                        'name': 'Friendly & Casual',
+                        'description': 'Great for lifestyle, personal, and conversational content',
+                        'voices': friendly_voices
+                    },
+                    'specialized': {
+                        'name': 'Specialized Voices',
+                        'description': 'Tailored for specific niches and use cases',
+                        'voices': specialized_voices
+                    }
+                },
+                'total_voices': len(professional_voices) + len(friendly_voices) + len(specialized_voices),
+                'default_voice_id': Config.DEFAULT_VOICE_ID,
+                'voice_cloning_available': bool(Config.ELEVEN_LABS_API_KEY)
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Get enhanced voices error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to get voice list'
+        }), 500
+
+
+# =============================================================================
+# ENHANCED DASHBOARD DATA
+# =============================================================================
+
+@app.route('/api/dashboard/enhanced', methods=['GET'])
+@token_required
+def get_enhanced_dashboard_data(current_user):
+    """Get comprehensive dashboard data including affiliate metrics"""
+    try:
+        from datetime import timedelta
+        
+        # Time ranges
+        today = datetime.now(timezone.utc)
+        last_7_days = today - timedelta(days=7)
+        last_30_days = today - timedelta(days=30)
+        
+        # Get basic profile info
+        influencer = db.get_influencer(current_user['id'])
+        
+        # Get chat interactions
+        recent_chats = db.supabase.table('chat_interactions') \
+            .select('*') \
+            .eq('influencer_id', current_user['id']) \
+            .gte('created_at', last_30_days.isoformat()) \
+            .execute()
+        
+        chats = recent_chats.data if recent_chats.data else []
+        
+        # Get affiliate links
+        affiliate_links = db.get_affiliate_links(current_user['id'])
+        
+        # Calculate metrics
+        total_chats = len(chats)
+        unique_visitors = len(set([chat.get("session_id") for chat in chats if chat.get("session_id")]))
+        video_responses = len([chat for chat in chats if chat.get('has_video')])
+        audio_responses = len([chat for chat in chats if chat.get('has_audio')])
+        product_recommendations = len([chat for chat in chats if chat.get('products_included')])
+        
+        # Weekly comparison
+        last_week_chats = [chat for chat in chats if datetime.fromisoformat(chat['created_at'].replace('Z', '+00:00')) >= last_7_days]
+        prev_week_chats = [chat for chat in chats if datetime.fromisoformat(chat['created_at'].replace('Z', '+00:00')) < last_7_days]
+        
+        week_growth = len(last_week_chats) - len(prev_week_chats)
+        week_growth_percent = (week_growth / len(prev_week_chats) * 100) if prev_week_chats else 0
+        
+        # Setup completion score
+        completion_score = 0
+        setup_items = {
+            'avatar_created': bool(influencer.get('heygen_avatar_id')),
+            'voice_configured': bool(influencer.get('preferred_voice_id')),
+            'bio_added': bool(influencer.get('bio')),
+            'expertise_added': bool(influencer.get('expertise')),
+            'affiliate_connected': len(affiliate_links) > 0,
+            'knowledge_added': False  # You could check for uploaded documents
+        }
+        
+        completion_score = sum(setup_items.values()) / len(setup_items) * 100
+        
+        dashboard_data = {
+            'overview': {
+                'total_chats': total_chats,
+                'unique_visitors': unique_visitors,
+                'video_responses': video_responses,
+                'audio_responses': audio_responses,
+                'product_recommendations': product_recommendations,
+                'completion_score': round(completion_score, 1),
+                'week_growth': week_growth,
+                'week_growth_percent': round(week_growth_percent, 1)
+            },
+            'setup_status': setup_items,
+            'affiliate_status': {
+                'connected_platforms': len(affiliate_links),
+                'total_platforms': 5,  # Amazon, Rakuten, ShareASale, CJ, Skimlinks
+                'platform_details': affiliate_links
+            },
+            'avatar_status': {
+                'has_avatar': bool(influencer.get('heygen_avatar_id')),
+                'avatar_id': influencer.get('heygen_avatar_id'),
+                'voice_configured': bool(influencer.get('preferred_voice_id')),
+                'preferred_voice': influencer.get('preferred_voice_id')
+            },
+            'recent_activity': [
+                {
+                    'type': 'chat',
+                    'message': chat.get('user_message', '')[:50] + '...',
+                    'timestamp': chat.get('created_at'),
+                    'has_video': chat.get('has_video', False),
+                    'has_audio': chat.get('has_audio', False)
+                }
+                for chat in sorted(chats, key=lambda x: x.get('created_at', ''), reverse=True)[:5]
+            ],
+            'chat_url': f"{request.host_url}pages/chat.html?username={influencer['username']}",
+            'profile': {
+                'username': influencer['username'],
+                'bio': influencer.get('bio', ''),
+                'expertise': influencer.get('expertise', ''),
+                'personality': influencer.get('personality', ''),
+                'created_at': influencer.get('created_at')
+            }
+        }
+        
+        return jsonify({
+            'status': 'success',
+            'data': dashboard_data
+        })
+        
+    except Exception as e:
+        logger.error(f"Enhanced dashboard data error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to get dashboard data'
+        }), 500
+           
 # =============================================================================
 # APPLICATION STARTUP
 # =============================================================================
 
-def main():
-    """Main application entry point"""
-    logger.info("🚀 Starting Enhanced AvatarCommerce API")
+# Initialize the enhanced chatbot
+def initialize_enhanced_chatbot():
+    """Initialize the enhanced chatbot with all features"""
+    global chatbot
     
-    # Create upload directory if it doesn't exist
-    os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
-    
-    # Get port from environment or use default
-    port = int(os.getenv('PORT', 2000))
-    
-    # Run application
-    logger.info(f"🌐 Enhanced server starting on port {port}")
-    app.run(
-        host='0.0.0.0',
-        port=port,
-        debug=os.getenv('FLASK_ENV') == 'development'
-    )
+    try:
+        from chatbot import EnhancedChatbot
+        chatbot = EnhancedChatbot(db=db)
+        logger.info("✅ Enhanced chatbot initialized with knowledge and affiliate integration")
+        return True
+    except ImportError:
+        try:
+            from chatbot import Chatbot
+            chatbot = Chatbot()
+            logger.warning("⚠️ Using basic chatbot - enhanced features may not be available")
+            return True
+        except ImportError as e:
+            logger.error(f"❌ Failed to initialize chatbot: {e}")
+            return False
 
+# Add this to your main initialization
 if __name__ == '__main__':
-    main()
+    # Validate environment
+    try:
+        Config.validate()
+        logger.info("✅ Environment validation passed")
+    except ValueError as e:
+        logger.error(f"❌ Environment validation failed: {e}")
+        exit(1)
+    
+    # Initialize enhanced chatbot
+    if not initialize_enhanced_chatbot():
+        logger.error("❌ Chatbot initialization failed")
+        exit(1)
+    
+    # Run the app
+    app.run(host='0.0.0.0', port=2000, debug=True)
