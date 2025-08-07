@@ -29,7 +29,7 @@ class RAGProcessor:
         self.supabase = create_client(supabase_url, supabase_key)
         self.openai_client = openai.OpenAI(api_key=openai_api_key)
         self.encoding = tiktoken.encoding_for_model("text-embedding-3-small")
-        
+                
     def process_document(self, document_id: str) -> bool:
         """
         Process a single document: extract text, create chunks, generate embeddings
@@ -293,3 +293,39 @@ class RAGProcessor:
             return 0
         
         return dot_product / (magnitude1 * magnitude2)
+    
+    def search_knowledge(self, query: str, influencer_id: str, limit: int = 3) -> List[Dict]:
+        try:
+            # Generate query embedding
+            query_embedding = self.embedding_model.encode(query).tolist()
+            
+            # Search knowledge_chunks table
+            response = self.supabase.table('knowledge_chunks') \
+                .select('content, metadata') \
+                .eq('influencer_id', influencer_id) \
+                .execute()
+            
+            chunks = response.data if response.data else []
+            if not chunks:
+                return []
+            
+            # Calculate cosine similarity
+            results = []
+            for chunk in chunks:
+                chunk_embedding = chunk.get('metadata', {}).get('embedding', [])
+                if chunk_embedding:
+                    similarity = np.dot(query_embedding, chunk_embedding) / (
+                        np.linalg.norm(query_embedding) * np.linalg.norm(chunk_embedding)
+                    )
+                    results.append({
+                        'content': chunk['content'],
+                        'similarity': similarity
+                    })
+            
+            # Sort by similarity and limit
+            results = sorted(results, key=lambda x: x['similarity'], reverse=True)[:limit]
+            return results
+        
+        except Exception as e:
+            logger.error(f"RAG search error: {e}")
+            return []

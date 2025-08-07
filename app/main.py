@@ -1660,7 +1660,7 @@ def speech_to_text():
 # Enhanced Chat Routes
 @app.route('/api/chat', methods=['POST'])
 def chat_with_influencer():
-    """FIXED: Chat endpoint that actually searches uploaded documents"""
+    """Enhanced chat endpoint with robust product recommendation support"""
     try:
         data = request.get_json()
         
@@ -1700,109 +1700,59 @@ def chat_with_influencer():
         
         logger.info(f"💬 Chat request - User: {influencer_name}, Message: {user_message[:50]}...")
         
-        # STEP 1: Get personal information
-        personal_context = ""
-        try:
-            personal_info = db.get_personal_knowledge(influencer_id)
-            if personal_info:
-                personal_parts = []
-                if personal_info.get('bio'):
-                    personal_parts.append(f"About me: {personal_info['bio']}")
-                if personal_info.get('expertise'):
-                    personal_parts.append(f"My expertise: {personal_info['expertise']}")
-                if personal_info.get('personality'):
-                    personal_parts.append(f"My communication style: {personal_info['personality']}")
-                
-                if personal_parts:
-                    personal_context = "\n\nPersonal information:\n" + "\n".join(personal_parts)
-        except Exception as e:
-            logger.error(f"Error getting personal info: {e}")
+        response_text = ""
+        products_included = False
         
-        # STEP 2: Search uploaded documents for relevant content
-        document_context = ""
-        documents_searched = 0
-        relevant_chunks_found = 0
-        
-        try:
-            # Generate embedding for the user's question
-            import openai
-            client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
+        # Check if it's a product query
+        if chatbot._is_product_query(user_message):
+            logger.info("🛒 Product query detected - generating recommendations")
             
-            embedding_response = client.embeddings.create(
-                model="text-embedding-3-small",
-                input=user_message
-            )
-            query_embedding = embedding_response.data[0].embedding
-            
-            # Search the knowledge base
-            knowledge_results = db.search_knowledge_base(influencer_id, query_embedding, limit=5)
-            documents_searched = len(knowledge_results)
-            
-            if knowledge_results:
-                relevant_chunks = []
-                for result in knowledge_results:
-                    similarity = result.get('similarity', 0)
-                    if similarity > 0.2:  # Lower threshold to catch more content
-                        chunk_text = result.get('text', '')[:400]  # Longer chunks
-                        doc_name = result.get('document_name', 'Document')
-                        relevant_chunks.append(f"From {doc_name}: {chunk_text}")
-                        relevant_chunks_found += 1
-                
-                if relevant_chunks:
-                    document_context = f"\n\nRelevant information from your uploaded documents:\n" + "\n".join(relevant_chunks)
-                    logger.info(f"📚 Using {len(relevant_chunks)} document chunks for response")
+            try:
+                if hasattr(chatbot, 'affiliate_service') and chatbot.affiliate_service:
+                    affiliate_links = db.get_affiliate_links(influencer_id)
+                    
+                    if affiliate_links:
+                        recommendations = chatbot.affiliate_service.get_product_recommendations(
+                            query=user_message,
+                            influencer_id=influencer_id,
+                            limit=3
+                        )
+                        
+                        if recommendations['products']:
+                            response_text = format_product_recommendations_quick(
+                                recommendations['products'], influencer_name
+                            )
+                            products_included = True
+                            logger.info(f"✅ Real product recommendations generated: {len(recommendations['products'])} products")
+                        else:
+                            logger.info("🤖 No affiliate products found, generating AI recommendations")
+                            response_text = generate_ai_product_recommendations_quick(user_message, influencer_name)
+                            products_included = True
+                    else:
+                        logger.info("🤖 No affiliate links, generating AI recommendations")
+                        response_text = generate_ai_product_recommendations_quick(user_message, influencer_name)
+                        products_included = True
                 else:
-                    logger.info("📚 No relevant chunks found (similarity too low)")
-            else:
-                logger.info("📚 No knowledge results returned from search")
-                
-        except Exception as e:
-            logger.error(f"Knowledge search error: {e}")
-        
-        # STEP 3: Build enhanced system prompt with ALL available knowledge
-        system_prompt = f"""You are an AI assistant representing {influencer_name}. You help users by providing helpful, engaging, and personalized responses.
-
-CORE INSTRUCTIONS:
-- Be conversational, friendly, and authentic
-- Use the specific information provided below to answer questions accurately
-- When you have specific details from documents (like resume, CV, etc.), use them directly
-- If someone asks about work experience, companies, education, etc., refer to the document content below
-- Be helpful and provide specific details when available
-
-{personal_context}
-
-{document_context}
-
-IMPORTANT: If the user asks about specific information (like companies, experience, education) and you have relevant document content above, use that information directly. Don't be vague - provide the specific details from the documents.
-
-RESPONSE GUIDELINES:
-- Answer questions directly using the provided information
-- If you have specific data from documents, share it
-- Be natural and conversational
-- If you don't have information about something, say so honestly
-
-Remember: You are {influencer_name}, and you should use the specific information provided above to answer questions about your background, experience, and expertise."""
-        
-        # STEP 4: Generate response
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
-                ],
-                max_tokens=500,
-                temperature=0.7
-            )
-            
-            ai_response = response.choices[0].message.content.strip()
-            
-            # Log what knowledge was used
-            logger.info(f"🤖 Response generated - Personal: {bool(personal_context)}, Documents: {bool(document_context)}, Chunks: {relevant_chunks_found}")
-            
-        except Exception as ai_error:
-            logger.error(f"AI response generation failed: {ai_error}")
-            ai_response = f"Hi! I'm {influencer_name}'s AI assistant. I'm having some technical difficulties accessing my knowledge base right now."
+                    logger.info("🤖 No affiliate service, generating AI recommendations")
+                    response_text = generate_ai_product_recommendations_quick(user_message, influencer_name)
+                    products_included = True
+            except Exception as affiliate_error:
+                logger.error(f"Affiliate service error: {affiliate_error}")
+                response_text = generate_ai_product_recommendations_quick(user_message, influencer_name)
+                products_included = True
+        else:
+            # Use EnhancedChatbot's method for non-product queries
+            try:
+                response_text = chatbot.get_chat_response_with_complete_knowledge(
+                    message=user_message,
+                    influencer_id=influencer_id,
+                    session_id=session_id,
+                    influencer_name=influencer_name,
+                    db=db
+                )
+            except Exception as chat_error:
+                logger.error(f"Basic chat response error: {chat_error}")
+                response_text = f"Hi! I'm {influencer_name}'s AI assistant. Thanks for your message! How can I help you today?"
         
         # Store interaction
         try:
@@ -1811,26 +1761,37 @@ Remember: You are {influencer_name}, and you should use the specific information
                 'influencer_id': influencer_id,
                 'session_id': session_id,
                 'user_message': user_message,
-                'bot_response': ai_response,
+                'bot_response': response_text,
+                'products_included': products_included,
+                'knowledge_enhanced': bool(chatbot.rag_processor and not products_included),
+                'has_video': False,
+                'has_audio': False,
                 'created_at': datetime.now(timezone.utc).isoformat()
             }
+            # Only add api_errors if the column exists
+            try:
+                db.supabase.table('chat_interactions').select('api_errors').limit(1).execute()
+                interaction_data['api_errors'] = [str(affiliate_error)] if 'affiliate_error' in locals() else []
+            except Exception:
+                logger.info("📋 api_errors column not found, skipping")
+            
             db.store_chat_interaction(interaction_data)
         except Exception as storage_error:
             logger.error(f"Failed to store interaction: {storage_error}")
         
-        response_data = {
-            'text': ai_response,
-            'session_id': session_id,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'knowledge_used': bool(document_context or personal_context),
-            'documents_searched': documents_searched,
-            'relevant_chunks_found': relevant_chunks_found,
-            'influencer_name': influencer_name
-        }
-        
         return jsonify({
             'status': 'success',
-            'data': response_data
+            'data': {
+                'text': response_text,
+                'session_id': session_id,
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'knowledge_enhanced': bool(chatbot.rag_processor and not products_included),
+                'products_included': products_included,
+                'video_url': '',
+                'audio_url': '',
+                'influencer_name': influencer_name,
+                'has_affiliate_products': products_included
+            }
         })
         
     except Exception as e:
@@ -1840,6 +1801,350 @@ Remember: You are {influencer_name}, and you should use the specific information
             'message': 'Chat service temporarily unavailable'
         }), 500
 
+def format_product_recommendations_quick(products: List[Dict], influencer_name: str) -> str:
+    """Format product recommendations for chat display"""
+    if not products:
+        return f"Sorry, I couldn't find any products right now. Can you specify more details?"
+    
+    formatted = f"Here are some great options I recommend as {influencer_name}:\n\n🛍️ **Recommended Products:**\n\n"
+    
+    for i, product in enumerate(products[:3], 1):
+        price_str = f"${product['price']:.2f}" if product['price'] > 0 else "Price varies"
+        rating_str = f"⭐ {product['rating']:.1f}" if product.get('rating', 0) > 0 else ""
+        
+        formatted += f"**{i}. {product['name']}**\n"
+        formatted += f"💰 {price_str}"
+        
+        if rating_str:
+            formatted += f" | {rating_str}"
+        
+        if product.get('shop_name'):
+            formatted += f" | 🏪 {product['shop_name']}"
+        
+        formatted += f"\n📝 {product['description'][:100]}...\n"
+        
+        if product.get('affiliate_url'):
+            formatted += f"🔗 [View Product]({product['affiliate_url']})\n\n"
+    
+        formatted += f"💡 *These recommendations are from {product.get('platform_name', 'our partners')}. I earn a small commission if you make a purchase.*\n"
+    
+    return formatted
+
+def generate_ai_product_recommendations_quick(query, influencer_name):
+    """Quick AI product recommendations"""
+    try:
+        import openai
+        client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
+        
+        prompt = f"""Generate 3 specific product recommendations for: {query}
+
+For each product:
+- Specific product name
+- Realistic price range
+- Brief description (1-2 sentences)
+
+Format as helpful recommendations from {influencer_name}."""
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=300,
+            temperature=0.7
+        )
+        
+        ai_response = response.choices[0].message.content.strip()
+        ai_response += f"\n\n💡 *These are {influencer_name}'s general recommendations. I'm working on bringing you specific deals through affiliate partnerships!*"
+        
+        return ai_response
+        
+    except Exception as e:
+        print(f"AI recommendation error: {e}")
+        return f"I'd love to help you find great {query} options! What specific features or budget are you considering?"
+
+def generate_basic_chat_response(message, influencer_name, influencer_id):
+    """Generate basic chat response"""
+    try:
+        import openai
+        client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
+        
+        # Get basic bio info if available
+        bio_context = ""
+        try:
+            influencer = db.get_influencer(influencer_id)
+            if influencer and influencer.get('bio'):
+                bio_context = f"\n\nAbout {influencer_name}: {influencer['bio']}"
+        except:
+            pass
+        
+        system_prompt = f"""You are {influencer_name}'s AI assistant. Be helpful, friendly, and conversational.{bio_context}
+
+Respond naturally to the user's message. Keep responses concise but informative (2-4 sentences)."""
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": message}
+            ],
+            max_tokens=200,
+            temperature=0.7
+        )
+        
+        return response.choices[0].message.content.strip()
+        
+    except Exception as e:
+        print(f"Basic chat response error: {e}")
+        return f"Hi! I'm {influencer_name}'s AI assistant. Thanks for your message! How can I help you today?"
+    
+def handle_product_query_fallback(user_message, influencer_id, influencer_name, session_id):
+    """Handle product queries when main chatbot fails"""
+    try:
+        logger.info(f"🛒 Handling product query fallback for: {user_message[:50]}...")
+        
+        # Check if affiliate service is available
+        if not chatbot.affiliate_service:
+            return generate_no_affiliate_response(user_message, influencer_name, session_id)
+        
+        # Try to get product recommendations
+        recommendations = chatbot.affiliate_service.get_product_recommendations(
+            query=user_message,
+            influencer_id=influencer_id,
+            limit=3
+        )
+        
+        if recommendations['products']:
+            # Format the products for display
+            response_text = f"Great question! Here are some product recommendations I found:\n\n"
+            
+            for i, product in enumerate(recommendations['products'][:3], 1):
+                price_str = f"${product['price']:.2f}" if product['price'] > 0 else "See price"
+                rating_str = f"⭐ {product['rating']:.1f}" if product['rating'] > 0 else ""
+                
+                response_text += f"**{i}. {product['name']}**\n"
+                response_text += f"💰 {price_str}"
+                
+                if rating_str:
+                    response_text += f" | {rating_str}"
+                
+                if product.get('shop_name'):
+                    response_text += f" | 🏪 {product['shop_name']}"
+                
+                if product.get('description'):
+                    response_text += f"\n📝 {product['description'][:150]}...\n"
+                
+                if product.get('affiliate_url'):
+                    response_text += f"🔗 [View Product]({product['affiliate_url']})\n\n"
+            
+            response_text += f"💡 *Found these through my affiliate partnerships. I may earn a small commission if you make a purchase.*"
+            
+            return jsonify({
+                'status': 'success',
+                'data': {
+                    'text': response_text,
+                    'session_id': session_id,
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'knowledge_enhanced': False,
+                    'products_included': True,
+                    'video_url': '',
+                    'audio_url': '',
+                    'influencer_name': influencer_name,
+                    'has_affiliate_products': True,
+                    'products_found': len(recommendations['products']),
+                    'platforms_searched': recommendations['platforms_searched']
+                }
+            })
+        else:
+            # No products found, generate AI recommendations
+            return generate_ai_product_fallback(user_message, influencer_name, session_id)
+            
+    except Exception as e:
+        logger.error(f"Product query fallback error: {e}")
+        return generate_ai_product_fallback(user_message, influencer_name, session_id)
+
+def generate_no_affiliate_response(user_message, influencer_name, session_id):
+    """Generate response when no affiliate service is available"""
+    response_text = f"I'd love to help you with product recommendations! However, I don't have my affiliate connections set up yet. "
+    response_text += f"In the meantime, I can share some general advice about {user_message.lower()}. "
+    response_text += f"What specific features or budget are you considering?"
+    
+    return jsonify({
+        'status': 'success',
+        'data': {
+            'text': response_text,
+            'session_id': session_id,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'knowledge_enhanced': False,
+            'products_included': False,
+            'video_url': '',
+            'audio_url': '',
+            'influencer_name': influencer_name,
+            'has_affiliate_products': False
+        }
+    })
+
+def generate_ai_product_fallback(user_message, influencer_name, session_id):
+    """Generate AI-based product recommendations as fallback"""
+    try:
+        client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
+        
+        prompt = f"""You are {influencer_name}, an influencer helping someone with product recommendations related to: {user_message}
+
+Generate 3 realistic, specific product recommendations. For each product, provide:
+- A specific product name
+- A realistic price range
+- A brief compelling description (1-2 sentences)
+- Why it's relevant to their query
+
+Format as a natural, engaging response. Start with something like "Here are some great options I'd recommend:" """
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": f"You are {influencer_name}, a helpful influencer who gives personalized product recommendations."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=400,
+            temperature=0.7
+        )
+        
+        ai_response = response.choices[0].message.content.strip()
+        ai_response += f"\n\n💡 *These are general recommendations. I'm working on connecting more affiliate partners to bring you specific products and deals!*"
+        
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'text': ai_response,
+                'session_id': session_id,
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'knowledge_enhanced': False,
+                'products_included': True,
+                'video_url': '',
+                'audio_url': '',
+                'influencer_name': influencer_name,
+                'has_affiliate_products': False,
+                'ai_generated': True
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"AI product fallback error: {e}")
+        return generate_simple_fallback_response(user_message, influencer_name, session_id)
+
+
+def generate_simple_fallback_response(user_message, influencer_name, session_id):
+    """Generate simple fallback response"""
+    response_text = f"Hi! I'm {influencer_name}'s AI assistant. Thanks for your message about '{user_message}'. "
+    response_text += f"I'm here to help! Could you tell me more specifically what you're looking for?"
+    
+    return jsonify({
+        'status': 'success',
+        'data': {
+            'text': response_text,
+            'session_id': session_id,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'knowledge_enhanced': False,
+            'products_included': False,
+            'video_url': '',
+            'audio_url': '',
+            'influencer_name': influencer_name,
+            'has_affiliate_products': False
+        }
+    })
+
+def search_knowledge_base_improved(db, influencer_id: str, query_embedding: List[float], limit: int = 5) -> List[Dict]:
+    """FIXED: Improved knowledge base search with better similarity calculation"""
+    try:
+        # Get all chunks for the influencer
+        response = db.supabase.table('knowledge_chunks') \
+            .select('*, knowledge_documents(filename)') \
+            .eq('influencer_id', influencer_id) \
+            .execute()
+        
+        chunks = response.data if response.data else []
+        logger.info(f"🔍 Found {len(chunks)} knowledge chunks for search")
+        
+        if not chunks:
+            return []
+        
+        # Calculate similarities
+        similarities = []
+        
+        for chunk in chunks:
+            try:
+                if chunk.get('embedding'):
+                    # FIXED: Parse embedding from JSON string
+                    embedding_str = chunk['embedding']
+                    if isinstance(embedding_str, str):
+                        try:
+                            chunk_embedding = json.loads(embedding_str)
+                        except json.JSONDecodeError:
+                            logger.warning(f"Could not parse embedding for chunk {chunk.get('id', 'unknown')}")
+                            continue
+                    elif isinstance(embedding_str, list):
+                        chunk_embedding = embedding_str
+                    else:
+                        logger.warning(f"Unknown embedding format for chunk {chunk.get('id', 'unknown')}")
+                        continue
+                    
+                    if chunk_embedding and len(chunk_embedding) == len(query_embedding):
+                        # FIXED: Calculate cosine similarity properly
+                        similarity = calculate_cosine_similarity(query_embedding, chunk_embedding)
+                        
+                        if similarity > 0.05:  # Only include chunks with some relevance
+                            similarities.append({
+                                'chunk_id': chunk.get('id'),
+                                'document_id': chunk.get('document_id'),
+                                'text': chunk.get('chunk_text', ''),
+                                'similarity': float(similarity),
+                                'chunk_index': chunk.get('chunk_index', 0),
+                                'document_name': chunk.get('knowledge_documents', {}).get('filename', 'Unknown') if chunk.get('knowledge_documents') else 'Unknown'
+                            })
+                        
+            except Exception as embedding_error:
+                logger.error(f"Error processing embedding for chunk {chunk.get('id', 'unknown')}: {embedding_error}")
+                continue
+        
+        # Sort by similarity and return top results
+        similarities.sort(key=lambda x: x['similarity'], reverse=True)
+        top_results = similarities[:limit]
+        
+        logger.info(f"🎯 Knowledge search returned {len(top_results)} relevant chunks")
+        for result in top_results[:3]:  # Log top 3 for debugging
+            logger.info(f"   - {result['document_name']}: {result['similarity']:.3f} - {result['text'][:100]}...")
+        
+        return top_results
+        
+    except Exception as e:
+        logger.error(f"Error in improved knowledge search: {e}")
+        return []
+
+def calculate_cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
+    """FIXED: Calculate cosine similarity between two vectors"""
+    try:
+        import math
+        
+        if len(vec1) != len(vec2):
+            logger.warning(f"Vector length mismatch: {len(vec1)} vs {len(vec2)}")
+            return 0.0
+        
+        dot_product = sum(a * b for a, b in zip(vec1, vec2))
+        magnitude1 = math.sqrt(sum(a * a for a in vec1))
+        magnitude2 = math.sqrt(sum(a * a for a in vec2))
+        
+        if magnitude1 == 0 or magnitude2 == 0:
+            return 0.0
+        
+        similarity = dot_product / (magnitude1 * magnitude2)
+        
+        # Ensure result is between -1 and 1
+        return max(-1.0, min(1.0, similarity))
+        
+    except Exception as e:
+        logger.error(f"Error calculating cosine similarity: {e}")
+        return 0.0
+        
 def generate_simple_enhanced_response(message: str, influencer_id: str, influencer_name: str) -> str:
     """Simple enhanced response with personal knowledge"""
     try:
@@ -1982,7 +2287,7 @@ def get_chat_info(username):
 @app.route('/api/knowledge/upload', methods=['POST'])
 @token_required
 def upload_knowledge_document(current_user):
-    """COMPLETE: Actually process uploaded documents for knowledge integration"""
+    """FIXED: Actually process uploaded documents for knowledge integration"""
     try:
         # Get uploaded file
         file = request.files.get('file')
@@ -2049,12 +2354,13 @@ def upload_knowledge_document(current_user):
             
         except Exception as extraction_error:
             logger.error(f"Text extraction failed: {extraction_error}")
-            # Continue anyway - we'll save the document metadata
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to extract text from document: {str(extraction_error)}'
+            }), 500
 
         # STEP 2: Save document metadata to database
         try:
-            storage_url = f"knowledge-documents/{unique_filename}"
-            
             document_data = {
                 'id': str(uuid.uuid4()),
                 'influencer_id': current_user['id'],
@@ -2062,11 +2368,10 @@ def upload_knowledge_document(current_user):
                 'safe_filename': unique_filename,
                 'content_type': content_type,
                 'file_size': file_size,
-                'storage_url': storage_url,
+                'storage_url': f"knowledge-documents/{unique_filename}",
                 'upload_date': datetime.now(timezone.utc).isoformat(),
-                'is_processed': bool(extracted_text),  # Mark as processed if we got text
-                'processed_date': datetime.now(timezone.utc).isoformat() if extracted_text else None,
-                'text_content': extracted_text[:5000] if extracted_text else None,  # Store first 5000 chars
+                'is_processed': False,  # Will be set to True after processing
+                'text_content': extracted_text[:5000] if extracted_text else None,
                 'chunk_count': 0,
                 'created_at': datetime.now(timezone.utc).isoformat(),
                 'updated_at': datetime.now(timezone.utc).isoformat()
@@ -2087,33 +2392,23 @@ def upload_knowledge_document(current_user):
                 'message': f'Failed to save document: {str(db_error)}'
             }), 500
 
-        # STEP 3: Create searchable chunks if we have text
+        # STEP 3: FIXED - Create searchable chunks with proper embeddings
         chunks_created = 0
         if extracted_text and len(extracted_text.strip()) > 50:
             try:
-                # Create text chunks
+                # Clean and prepare text
                 import re
-                
-                # Clean text
                 clean_text = re.sub(r'\s+', ' ', extracted_text).strip()
                 
-                # Split into chunks (500 characters each with overlap)
-                chunks = []
-                chunk_size = 500
-                overlap = 50
-                
-                for i in range(0, len(clean_text), chunk_size - overlap):
-                    chunk = clean_text[i:i + chunk_size]
-                    if chunk.strip():
-                        chunks.append(chunk.strip())
-                
+                # FIXED: Better chunking strategy
+                chunks = create_better_text_chunks(clean_text, max_chunk_size=400, overlap=50)
                 logger.info(f"📝 Created {len(chunks)} text chunks")
                 
-                # Generate embeddings for chunks
-                embeddings = []
+                # FIXED: Generate embeddings using OpenAI
                 if chunks:
                     try:
-                        import openai
+                        # Generate embeddings for all chunks
+                        embeddings = []
                         client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
                         
                         for chunk in chunks:
@@ -2125,12 +2420,7 @@ def upload_knowledge_document(current_user):
                         
                         logger.info(f"🧠 Generated {len(embeddings)} embeddings")
                         
-                    except Exception as embedding_error:
-                        logger.error(f"Embedding generation failed: {embedding_error}")
-                
-                # Store chunks in database
-                if chunks and embeddings:
-                    try:
+                        # FIXED: Store chunks with proper embeddings
                         chunk_data = []
                         for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
                             chunk_data.append({
@@ -2139,30 +2429,42 @@ def upload_knowledge_document(current_user):
                                 'influencer_id': current_user['id'],
                                 'chunk_index': i,
                                 'chunk_text': chunk,
-                                'embedding': json.dumps(embedding),
+                                'embedding': json.dumps(embedding),  # Store as JSON string
                                 'token_count': len(chunk.split()),
                                 'created_at': datetime.now(timezone.utc).isoformat()
                             })
                         
                         # Insert all chunks
-                        chunk_response = db.supabase.table('knowledge_chunks').insert(chunk_data).execute()
-                        
-                        if chunk_response.data:
-                            chunks_created = len(chunk_response.data)
+                        if chunk_data:
+                            chunk_response = db.supabase.table('knowledge_chunks').insert(chunk_data).execute()
                             
-                            # Update document with chunk count
-                            db.supabase.table('knowledge_documents').update({
-                                'chunk_count': chunks_created,
-                                'is_processed': True
-                            }).eq('id', document_id).execute()
-                            
-                            logger.info(f"✅ Stored {chunks_created} chunks in knowledge base")
+                            if chunk_response.data:
+                                chunks_created = len(chunk_response.data)
+                                
+                                # Update document as processed
+                                db.supabase.table('knowledge_documents').update({
+                                    'chunk_count': chunks_created,
+                                    'is_processed': True,
+                                    'processed_date': datetime.now(timezone.utc).isoformat()
+                                }).eq('id', document_id).execute()
+                                
+                                logger.info(f"✅ Stored {chunks_created} chunks in knowledge base")
+                            else:
+                                logger.error("Failed to store chunks in database")
                         
-                    except Exception as chunk_error:
-                        logger.error(f"Chunk storage failed: {chunk_error}")
+                    except Exception as embedding_error:
+                        logger.error(f"Embedding generation failed: {embedding_error}")
+                        return jsonify({
+                            'status': 'error',
+                            'message': f'Failed to process document for search: {str(embedding_error)}'
+                        }), 500
                 
             except Exception as processing_error:
                 logger.error(f"Document processing failed: {processing_error}")
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Failed to process document: {str(processing_error)}'
+                }), 500
 
         return jsonify({
             'status': 'success',
@@ -2184,6 +2486,38 @@ def upload_knowledge_document(current_user):
             'status': 'error',
             'message': f'Failed to upload document: {str(e)}'
         }), 500
+
+def create_better_text_chunks(text: str, max_chunk_size: int = 400, overlap: int = 50) -> List[str]:
+    """Create better text chunks with sentence awareness"""
+    import re
+    
+    # Split into sentences
+    sentences = re.split(r'[.!?]+', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    
+    chunks = []
+    current_chunk = ""
+    
+    for sentence in sentences:
+        # If adding this sentence would make chunk too long and we have content
+        if len(current_chunk) + len(sentence) > max_chunk_size and current_chunk:
+            chunks.append(current_chunk.strip())
+            
+            # Start new chunk with overlap (last few words)
+            words = current_chunk.split()
+            if len(words) > overlap:
+                overlap_text = " ".join(words[-overlap:])
+                current_chunk = overlap_text + " " + sentence
+            else:
+                current_chunk = sentence
+        else:
+            current_chunk += " " + sentence if current_chunk else sentence
+    
+    # Add final chunk
+    if current_chunk.strip():
+        chunks.append(current_chunk.strip())
+    
+    return chunks
 
 @app.route('/api/knowledge/documents', methods=['GET'])
 @token_required
@@ -2237,7 +2571,7 @@ def get_knowledge_documents(current_user):
             'status': 'error',
             'message': 'Failed to get knowledge documents'
         }), 500
-        
+
 def extract_text_from_file(file_content: bytes, content_type: str) -> str:
     """Extract text from PDF or Word documents"""
     try:
@@ -2569,8 +2903,8 @@ def test_knowledge_search(current_user):
 
 @app.route('/api/affiliate', methods=['POST'])
 @token_required
-def connect_affiliate_platform(current_user):
-    """FIXED: Connect affiliate platform with simplified database schema"""
+def connect_affiliate_platform_fixed(current_user):
+    """FIXED: Connect affiliate platform with proper credential storage"""
     try:
         data = request.get_json()
         
@@ -2580,8 +2914,11 @@ def connect_affiliate_platform(current_user):
                 'message': 'No data provided'
             }), 400
         
-        platform = data.get('platform', '').lower()
+        platform = data.get('platform', '').lower().strip()
         valid_platforms = ['amazon', 'rakuten', 'shareasale', 'cj_affiliate', 'skimlinks']
+        
+        logger.info(f"🔗 Connecting {platform} for user {current_user['username']}")
+        logger.info(f"📝 Data received: {list(data.keys())}")
         
         if platform not in valid_platforms:
             return jsonify({
@@ -2589,15 +2926,15 @@ def connect_affiliate_platform(current_user):
                 'message': f'Invalid platform. Must be one of: {", ".join(valid_platforms)}'
             }), 400
         
-        # Check if platform already exists for this user
+        # Check if already connected
         existing_link = db.get_affiliate_link_by_platform(current_user['id'], platform)
         if existing_link:
             return jsonify({
                 'status': 'error',
-                'message': f'{platform} is already connected to your account'
+                'message': f'{platform.title()} is already connected'
             }), 400
         
-        # FIXED: Simplified affiliate data that matches database schema
+        # FIXED: Platform-specific validation and data preparation
         affiliate_data = {
             'id': str(uuid.uuid4()),
             'influencer_id': current_user['id'],
@@ -2607,75 +2944,68 @@ def connect_affiliate_platform(current_user):
             'updated_at': datetime.now(timezone.utc).isoformat()
         }
         
-        # FIXED: Only store the main affiliate_id, not all credentials
-        if platform == 'amazon':
-            affiliate_id = data.get('partner_tag', '')
-            if not affiliate_id:
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Partner tag is required for Amazon'
-                }), 400
-            affiliate_data['affiliate_id'] = affiliate_id
+        if platform == 'rakuten':
+            # FIXED: Proper Rakuten validation and storage
+            client_id = data.get('client_id', '').strip()
+            client_secret = data.get('client_secret', '').strip()
+            application_id = data.get('application_id', '').strip()
             
-        elif platform == 'rakuten':
-            # For Rakuten, use client_id as the affiliate_id
-            affiliate_id = data.get('client_id', '')
-            if not affiliate_id or not data.get('client_secret'):
+            if not client_id or not client_secret:
                 return jsonify({
                     'status': 'error',
-                    'message': 'Client ID and Client Secret are required for Rakuten'
+                    'message': 'Client ID and Client Secret are required for Rakuten Advertising'
                 }), 400
-            affiliate_data['affiliate_id'] = affiliate_id
             
-        elif platform == 'shareasale':
-            affiliate_id = data.get('affiliate_id', '')
-            if not affiliate_id or not data.get('api_token') or not data.get('secret_key'):
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Affiliate ID, API token, and secret key are required for ShareASale'
-                }), 400
-            affiliate_data['affiliate_id'] = affiliate_id
+            # Store credentials properly
+            affiliate_data.update({
+                'affiliate_id': client_id,  # Use client_id as primary identifier
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'rakuten_client_id': client_id,
+                'rakuten_client_secret': client_secret,
+                'rakuten_application_id': application_id,
+                'application_id': application_id
+            })
             
-        elif platform == 'cj_affiliate':
-            affiliate_id = data.get('website_id', '')
-            if not affiliate_id or not data.get('api_key'):
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Website ID and API key are required for CJ Affiliate'
-                }), 400
-            affiliate_data['affiliate_id'] = affiliate_id
+            logger.info(f"✅ Rakuten credentials prepared - Client ID: {client_id}")
             
-        elif platform == 'skimlinks':
-            affiliate_id = data.get('publisher_id', '')
-            if not affiliate_id or not data.get('api_key'):
+        elif platform == 'amazon':
+            # Amazon validation
+            access_key = data.get('access_key', '').strip()
+            secret_key = data.get('secret_key', '').strip()
+            partner_tag = data.get('partner_tag', '').strip()
+            
+            if not all([access_key, secret_key, partner_tag]):
                 return jsonify({
                     'status': 'error',
-                    'message': 'Publisher ID and API key are required for Skimlinks'
+                    'message': 'Access Key, Secret Key, and Partner Tag are required for Amazon'
                 }), 400
-            affiliate_data['affiliate_id'] = affiliate_id
+            
+            affiliate_data.update({
+                'affiliate_id': partner_tag,
+                'access_key': access_key,
+                'secret_key': secret_key,
+                'partner_tag': partner_tag,
+                'amazon_access_key': access_key,
+                'amazon_secret_key': secret_key
+            })
+            
+        # Add other platforms as needed...
         
-        # FIXED: Store credentials separately (you'll need to implement credential storage)
-        # For now, we'll store them in a separate way or handle them differently
-        
-        # Save to database using the simple schema
+        # Save to database
         success = db.create_affiliate_link(affiliate_data)
         
         if success:
-            logger.info(f"✅ Affiliate link created for {current_user['username']} - Platform: {platform}")
-            
-            # TODO: Store the detailed credentials securely (implement credential storage)
-            # For now, the connection will work but credentials won't be persisted
-            
+            logger.info(f"✅ {platform.title()} connected successfully for {current_user['username']}")
             return jsonify({
                 'status': 'success',
                 'message': f'{platform.title()} connected successfully',
                 'data': {
                     'platform': platform,
-                    'affiliate_id': affiliate_data['affiliate_id'],
-                    'connected_at': affiliate_data['created_at'],
-                    'note': 'Basic connection established. Full credential storage coming soon.'
+                    'affiliate_id': affiliate_data.get('affiliate_id', ''),
+                    'connected_at': affiliate_data['created_at']
                 }
-            })
+            }), 201
         else:
             return jsonify({
                 'status': 'error',
@@ -2683,12 +3013,12 @@ def connect_affiliate_platform(current_user):
             }), 500
             
     except Exception as e:
-        logger.error(f"Connect affiliate platform error: {e}")
+        logger.error(f"❌ Connect affiliate platform error: {e}")
         return jsonify({
             'status': 'error',
             'message': f'Failed to connect platform: {str(e)}'
         }), 500
-
+    
 @app.route('/api/affiliate/<platform>', methods=['DELETE'])
 @token_required
 def remove_affiliate_link(current_user, platform):
@@ -2779,7 +3109,7 @@ def update_affiliate_link(current_user, platform):
 @app.route('/api/affiliate/search-products', methods=['POST'])
 @token_required
 def search_affiliate_products(current_user):
-    """FIXED: Search for products across all connected affiliate platforms"""
+    """FIXED: Search for products with enhanced debugging"""
     try:
         data = request.get_json()
         
@@ -2790,8 +3120,8 @@ def search_affiliate_products(current_user):
             }), 400
         
         query = data.get('query', '').strip()
-        platform = data.get('platform', 'all')  # 'all' or specific platform
-        limit = min(int(data.get('limit', 10)), 20)  # Max 20 products
+        platform = data.get('platform', 'all')
+        limit = min(int(data.get('limit', 5)), 20)
         
         if not query:
             return jsonify({
@@ -2799,16 +3129,16 @@ def search_affiliate_products(current_user):
                 'message': 'Search query is required'
             }), 400
         
-        logger.info(f"🔍 Product search - User: {current_user['username']}, Query: {query}, Platform: {platform}")
+        logger.info(f"🔍 Product search - User: {current_user['username']}, Query: '{query}', Platform: {platform}")
         
-        # FIXED: Use the affiliate service from chatbot
-        if not chatbot.affiliate_service:
+        # Check if affiliate service is available
+        if not hasattr(chatbot, 'affiliate_service') or not chatbot.affiliate_service:
             return jsonify({
                 'status': 'error',
                 'message': 'Affiliate service not available'
             }), 503
         
-        # Search products
+        # FIXED: Enhanced product search with better error handling
         if platform == 'all':
             # Search across all connected platforms
             recommendations = chatbot.affiliate_service.get_product_recommendations(
@@ -2816,6 +3146,8 @@ def search_affiliate_products(current_user):
                 influencer_id=current_user['id'],
                 limit=limit
             )
+            
+            logger.info(f"📦 Multi-platform search results: {recommendations['total_found']} products from {recommendations['platforms_searched']} platforms")
             
             return jsonify({
                 'status': 'success',
@@ -2836,6 +3168,8 @@ def search_affiliate_products(current_user):
                 limit=limit
             )
             
+            logger.info(f"📦 Single platform ({platform}) search results: {len(products)} products")
+            
             return jsonify({
                 'status': 'success',
                 'data': {
@@ -2851,7 +3185,7 @@ def search_affiliate_products(current_user):
         logger.error(f"Product search error: {e}")
         return jsonify({
             'status': 'error',
-            'message': 'Failed to search products'
+            'message': f'Failed to search products: {str(e)}'
         }), 500
 
 @app.route('/api/affiliate/platform-status', methods=['GET'])
@@ -2967,7 +3301,7 @@ def get_platform_status(current_user):
 @app.route('/api/affiliate/test-connection', methods=['POST'])
 @token_required
 def test_affiliate_connection(current_user):
-    """FIXED: Simplified test connection that doesn't require full credentials"""
+    """FIXED: Test affiliate connection with proper validation"""
     try:
         data = request.get_json()
         
@@ -2977,8 +3311,11 @@ def test_affiliate_connection(current_user):
                 'message': 'No data provided'
             }), 400
         
-        platform = data.get('platform', '').lower()
+        platform = data.get('platform', '').lower().strip()
         credentials = data.get('credentials', {})
+        
+        logger.info(f"🔍 Testing {platform} connection for {current_user['username']}")
+        logger.info(f"📝 Credentials provided: {list(credentials.keys())}")
         
         if not platform or not credentials:
             return jsonify({
@@ -2986,58 +3323,104 @@ def test_affiliate_connection(current_user):
                 'message': 'Platform and credentials are required'
             }), 400
         
-        logger.info(f"🔍 Testing {platform} connection...")
-        
-        # FIXED: Simple validation - just check that required fields are present
+        # FIXED: Platform-specific validation with detailed feedback
         validation_passed = False
+        validation_error = ""
+        validation_details = {}
         
         if platform == 'amazon':
-            validation_passed = bool(
-                credentials.get('access_key') and 
-                credentials.get('secret_key') and 
-                credentials.get('partner_tag')
-            )
+            required_fields = ['access_key', 'secret_key', 'partner_tag']
+            missing = [field for field in required_fields if not credentials.get(field, '').strip()]
+            if missing:
+                validation_error = f"Missing required fields: {', '.join(missing)}"
+            else:
+                validation_passed = True
+                validation_details = {
+                    'access_key_format': 'Valid' if credentials.get('access_key', '').startswith('AKIA') else 'Warning: Should start with AKIA',
+                    'partner_tag_format': 'Valid' if '-' in credentials.get('partner_tag', '') else 'Warning: Should contain a hyphen'
+                }
+                
         elif platform == 'rakuten':
-            validation_passed = bool(
-                credentials.get('client_id') and 
-                credentials.get('client_secret')
-            )
+            client_id = credentials.get('client_id', '').strip()
+            if not client_id:
+                validation_error = "Application ID (Client ID) is required for Rakuten"
+            elif len(client_id) < 5:
+                validation_error = "Rakuten Application ID must be at least 5 characters"
+            elif not client_id.replace('-', '').replace('_', '').isalnum():
+                validation_error = "Rakuten Application ID can only contain letters, numbers, hyphens, and underscores"
+            else:
+                validation_passed = True
+                validation_details = {
+                    'application_id': client_id,
+                    'format': f'Valid alphanumeric ID ({len(client_id)} characters)',
+                    'client_secret': 'Provided' if credentials.get('client_secret') else 'Not provided (optional)',
+                    'affiliate_id': 'Provided' if credentials.get('affiliate_id') else 'Not provided (optional)'
+                }
+                logger.info(f"✅ Rakuten validation passed - Application ID: {client_id}")
+                
         elif platform == 'shareasale':
-            validation_passed = bool(
-                credentials.get('api_token') and 
-                credentials.get('secret_key') and 
-                credentials.get('affiliate_id')
-            )
+            required_fields = ['api_token', 'secret_key', 'affiliate_id']
+            missing = [field for field in required_fields if not credentials.get(field, '').strip()]
+            if missing:
+                validation_error = f"Missing required fields: {', '.join(missing)}"
+            else:
+                validation_passed = True
+                validation_details = {
+                    'api_token_length': len(credentials.get('api_token', '')),
+                    'affiliate_id_format': 'Valid' if credentials.get('affiliate_id', '').isdigit() else 'Should be numeric'
+                }
+                
         elif platform == 'cj_affiliate':
-            validation_passed = bool(
-                credentials.get('api_key') and 
-                credentials.get('website_id')
-            )
+            required_fields = ['api_key', 'website_id']
+            missing = [field for field in required_fields if not credentials.get(field, '').strip()]
+            if missing:
+                validation_error = f"Missing required fields: {', '.join(missing)}"
+            else:
+                validation_passed = True
+                validation_details = {
+                    'api_key_length': len(credentials.get('api_key', '')),
+                    'website_id_format': 'Valid' if credentials.get('website_id', '').isdigit() else 'Should be numeric'
+                }
+                
         elif platform == 'skimlinks':
-            validation_passed = bool(
-                credentials.get('api_key') and 
-                credentials.get('publisher_id')
-            )
+            required_fields = ['api_key', 'publisher_id']
+            missing = [field for field in required_fields if not credentials.get(field, '').strip()]
+            if missing:
+                validation_error = f"Missing required fields: {', '.join(missing)}"
+            else:
+                validation_passed = True
+                validation_details = {
+                    'api_key_length': len(credentials.get('api_key', '')),
+                    'publisher_id_format': 'Valid' if credentials.get('publisher_id', '').isdigit() else 'Should be numeric'
+                }
+        else:
+            validation_error = f"Unsupported platform: {platform}"
         
         if validation_passed:
+            logger.info(f"✅ {platform} validation successful")
             return jsonify({
                 'status': 'success',
                 'message': f'{platform.title()} credentials validated successfully',
                 'data': {
                     'platform': platform,
                     'connection_status': 'validated',
-                    'credentials_provided': True
+                    'credentials_provided': True,
+                    'fields_validated': list(credentials.keys()),
+                    'validation_details': validation_details
                 }
             })
         else:
+            logger.error(f"❌ {platform} validation failed: {validation_error}")
             return jsonify({
                 'status': 'error',
-                'message': f'{platform.title()} credentials validation failed. Please check all required fields.',
-                'error_type': 'validation_error'
+                'message': validation_error,
+                'error_type': 'validation_error',
+                'platform': platform,
+                'fields_provided': list(credentials.keys())
             }), 400
         
     except Exception as e:
-        logger.error(f"Test affiliate connection error: {e}")
+        logger.error(f"❌ Test affiliate connection error: {e}")
         return jsonify({
             'status': 'error',
             'message': f'Connection test failed: {str(e)}'

@@ -5,10 +5,15 @@ import hashlib
 import hmac
 import base64
 import time
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from urllib.parse import urlencode, quote
 from datetime import datetime
 from typing import Dict, List, Optional
 import logging
+import certifi
+import os
+os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
 
 logger = logging.getLogger(__name__)
 
@@ -81,167 +86,164 @@ class AffiliateService:
             logger.error(f"Error getting product recommendations: {e}")
             return {'products': [], 'total_found': 0, 'platforms_searched': 0}
 
-
 class RakutenAPI:
-    """FIXED: Rakuten Advertising API implementation with correct credentials"""
+    """Rakuten Advertising API implementation"""
     
     def __init__(self):
-        # Updated base URL for Rakuten Advertising API
-        self.base_url = "https://api.rakutenadvertising.com/productsearch/v1"
+        self.base_url = "https://api.rakutenadvertising.com/v1/productsearch"
+        self.auth_url = "https://api.rakutenadvertising.com/token"
+        self.access_token = None
+        self.token_expires_at = 0
+        self.session = requests.Session()
+        retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+        self.session.mount('https://', HTTPAdapter(max_retries=retries))
         
     def get_platform_name(self):
         return "Rakuten Advertising"
     
-    def search_products(self, query: str, affiliate_info: Dict, limit: int = 5) -> List[Dict]:
-        """Search products using Rakuten Product Search API with Client ID/Secret"""
+    def _get_access_token(self, client_id: str, client_secret: str) -> Optional[str]:
+        """Get OAuth 2.0 access token from Rakuten Advertising"""
         try:
-            # FIXED: Use Client ID and Client Secret instead of merchant_id and token
-            client_id = affiliate_info.get('client_id') or affiliate_info.get('rakuten_client_id')
-            client_secret = affiliate_info.get('client_secret') or affiliate_info.get('rakuten_client_secret')
-            application_id = affiliate_info.get('application_id') or affiliate_info.get('rakuten_application_id')
+            logger.info(f"🔑 Auth request to: {self.auth_url}")
+            headers = {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'application/json'
+            }
+            payload = {
+                'grant_type': 'client_credentials',
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'scope': 'productsearch'
+            }
+            
+            # Try with SSL verification
+            response = self.session.post(
+                self.auth_url,
+                headers=headers,
+                data=payload,
+                timeout=10,
+                verify=True
+            )
+            
+            logger.info(f"📡 Rakuten auth response: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                self.access_token = data.get('access_token')
+                self.token_expires_at = time.time() + data.get('expires_in', 3600) - 300
+                logger.info(f"✅ Got Rakuten access token: {self.access_token[:20]}...")
+                return self.access_token
+            else:
+                logger.error(f"❌ Rakuten auth failed: {response.status_code} - {response.text}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Rakuten authentication error: {e}")
+            # Log additional SSL error details
+            if isinstance(e, requests.exceptions.SSLError):
+                logger.error("SSL Error Details: Verify the endpoint and CA certificates")
+            return None
+    
+    def search_products(self, query: str, affiliate_info: Dict, limit: int = 5) -> List[Dict]:
+        """Search products using Rakuten Advertising API"""
+        try:
+            client_id = (affiliate_info.get('client_id') or 
+                        affiliate_info.get('rakuten_client_id') or
+                        affiliate_info.get('rakuten_application_id'))
+            client_secret = (affiliate_info.get('client_secret') or 
+                           affiliate_info.get('rakuten_client_secret'))
+            
+            logger.info(f"🔍 Rakuten search - Client ID: {client_id[:10] if client_id else 'None'}..., Has Secret: {bool(client_secret)}")
             
             if not client_id or not client_secret:
-                logger.error("Missing Rakuten Client ID or Client Secret")
+                logger.error("❌ Missing Rakuten Client ID or Client Secret")
+                logger.error(f"Available fields in affiliate_info: {list(affiliate_info.keys())}")
                 return []
             
-            # First get access token using Client Credentials flow
             access_token = self._get_access_token(client_id, client_secret)
             if not access_token:
-                logger.error("Failed to get Rakuten access token")
+                logger.error("❌ Failed to get Rakuten access token")
                 return []
             
             headers = {
                 'Authorization': f'Bearer {access_token}',
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
             }
             
             params = {
                 'keyword': query,
-                'limit': min(limit, 20),  # Rakuten max is usually 20
+                'maxResults': min(limit, 50),
                 'format': 'json',
-                'imageFlag': '1',  # Include images
-                'sort': 'standard'  # Sort by relevance
+                'sort': 'relevance',
+                'currency': 'USD',
+                'country': 'US',
+                'includeImages': 'true'
             }
             
-            # Add application ID if available
-            if application_id:
-                params['applicationId'] = application_id
+            app_id = affiliate_info.get('application_id') or affiliate_info.get('rakuten_application_id')
+            if app_id:
+                params['applicationId'] = app_id
             
-            logger.info(f"Searching Rakuten for: {query}")
+            logger.info(f"🔍 Searching Rakuten Advertising for: '{query}' with token: {access_token[:20]}...")
             
-            response = requests.get(
-                f"{self.base_url}/search",
+            response = self.session.get(
+                self.base_url,
                 headers=headers,
                 params=params,
                 timeout=15
             )
             
+            logger.info(f"📡 Rakuten API Response: {response.status_code}")
+            
             if response.status_code == 200:
                 data = response.json()
                 products = []
                 
-                # Parse Rakuten response format
-                items = data.get('Items', []) or data.get('products', [])
+                items = data.get('products', []) or data.get('result', {}).get('products', [])
+                if not items and 'data' in data:
+                    items = data['data']
+                
+                logger.info(f"📦 Found {len(items)} raw items from Rakuten")
                 
                 for item in items[:limit]:
-                    # Handle different response formats
-                    item_data = item.get('Item', item)
-                    
-                    product = {
-                        'id': item_data.get('itemCode', '') or item_data.get('id', ''),
-                        'name': item_data.get('itemName', '') or item_data.get('name', ''),
-                        'price': self._parse_price(item_data.get('itemPrice', 0) or item_data.get('price', 0)),
-                        'currency': 'USD',
-                        'image_url': self._extract_image_url(item_data),
-                        'affiliate_url': item_data.get('affiliateUrl', '') or item_data.get('url', ''),
-                        'description': item_data.get('itemCaption', '') or item_data.get('description', ''),
-                        'rating': float(item_data.get('reviewAverage', 0) or item_data.get('rating', 0)),
-                        'review_count': int(item_data.get('reviewCount', 0) or item_data.get('review_count', 0)),
-                        'availability': item_data.get('availability', 1) > 0,
-                        'relevance_score': 0.8,
-                        'shop_name': item_data.get('shopName', '') or item_data.get('shop', ''),
-                        'shop_url': item_data.get('shopUrl', ''),
-                        'category': item_data.get('genreId', '') or item_data.get('category', '')
-                    }
-                    
-                    products.append(product)
+                    try:
+                        product = {
+                            'id': str(item.get('sku', '') or item.get('id', '') or item.get('productId', '')),
+                            'name': item.get('name', '') or item.get('title', '') or item.get('productName', ''),
+                            'price': float(item.get('price', 0) or item.get('salePrice', 0)),
+                            'currency': item.get('currency', 'USD'),
+                            'image_url': item.get('imageUrl', '') or item.get('image', ''),
+                            'affiliate_url': item.get('clickUrl', '') or item.get('link', '') or item.get('url', ''),
+                            'description': item.get('description', '') or item.get('shortDescription', ''),
+                            'rating': float(item.get('rating', 0) or item.get('averageRating', 0)),
+                            'review_count': int(item.get('reviewCount', 0) or item.get('numReviews', 0)),
+                            'availability': item.get('inStock', True) and item.get('available', True),
+                            'relevance_score': 0.85,
+                            'shop_name': item.get('retailer', '') or item.get('merchant', '') or 'Rakuten Partner',
+                            'shop_url': item.get('retailerUrl', ''),
+                            'category': item.get('category', '') or item.get('primaryCategory', ''),
+                            'brand': item.get('brand', ''),
+                            'platform': 'rakuten',
+                            'platform_name': 'Rakuten Advertising'
+                        }
+                        
+                        if product['name'] and (product['price'] > 0 or product['affiliate_url']):
+                            products.append(product)
+                        
+                    except Exception as item_error:
+                        logger.error(f"❌ Error processing Rakuten item: {item_error}")
+                        continue
                 
-                logger.info(f"Found {len(products)} products from Rakuten")
+                logger.info(f"✅ Processed {len(products)} valid products from Rakuten")
                 return products
-                
             else:
-                logger.error(f"Rakuten API error: {response.status_code} - {response.text}")
+                logger.error(f"❌ Rakuten API error: {response.status_code} - {response.text}")
                 return []
                 
         except Exception as e:
-            logger.error(f"Rakuten search error: {e}")
+            logger.error(f"❌ Rakuten search error: {e}")
             return []
-    
-    def _get_access_token(self, client_id: str, client_secret: str) -> Optional[str]:
-        """Get OAuth access token using client credentials"""
-        try:
-            auth_url = "https://api.rakutenadvertising.com/auth/token"
-            
-            # Prepare authentication data
-            auth_data = {
-                'grant_type': 'client_credentials',
-                'client_id': client_id,
-                'client_secret': client_secret,
-                'scope': 'productapi'
-            }
-            
-            headers = {
-                'Content-Type': 'application/x-www-form-urlencoded'
-            }
-            
-            response = requests.post(
-                auth_url,
-                data=auth_data,
-                headers=headers,
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                token_data = response.json()
-                return token_data.get('access_token')
-            else:
-                logger.error(f"Rakuten auth error: {response.status_code} - {response.text}")
-                return None
-                
-        except Exception as e:
-            logger.error(f"Rakuten authentication error: {e}")
-            return None
-    
-    def _extract_image_url(self, item_data):
-        """Extract image URL from various possible formats"""
-        # Try different possible image fields
-        if 'mediumImageUrls' in item_data and item_data['mediumImageUrls']:
-            return item_data['mediumImageUrls'][0].get('imageUrl', '')
-        elif 'imageUrl' in item_data:
-            return item_data['imageUrl']
-        elif 'image_url' in item_data:
-            return item_data['image_url']
-        elif 'images' in item_data and item_data['images']:
-            return item_data['images'][0] if isinstance(item_data['images'], list) else item_data['images']
-        return ''
-    
-    def _parse_price(self, price_data):
-        """Parse Rakuten price format"""
-        if isinstance(price_data, (int, float)):
-            return float(price_data)
-        elif isinstance(price_data, str):
-            # Remove currency symbols and parse
-            import re
-            price_str = re.sub(r'[^\d.]', '', price_data)
-            try:
-                return float(price_str)
-            except ValueError:
-                return 0.0
-        elif isinstance(price_data, dict):
-            # Handle price object format
-            return float(price_data.get('amount', 0) or price_data.get('value', 0))
-        return 0.0
-
 
 class AmazonAPI:
     """Amazon Product Advertising API implementation"""

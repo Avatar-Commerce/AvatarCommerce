@@ -1,96 +1,142 @@
-# test_avatar_working.py - Test avatar creation with your 109 credits
+#!/usr/bin/env python3
+"""
+Debug script to check affiliate connections and product recommendations
+Run this to diagnose issues with product recommendations
+"""
 
-import requests
 import os
+import sys
 from dotenv import load_dotenv
 
+# Load environment variables
 load_dotenv()
 
-HEYGEN_API_KEY = os.getenv("HEYGEN_API_KEY")
-API_BASE_URL = "http://localhost:2000/api"
+# Add the app directory to Python path
+sys.path.append('./app')
 
-def test_with_existing_avatar():
-    """Test using your existing avatar"""
-    print("🧪 Testing with existing avatar...")
-    
-    # Your existing avatar ID from the logs
-    existing_avatar_id = "0019574bacd74bd9a2cb76ac19bfb773"
-    
-    print(f"📋 Found existing avatar: {existing_avatar_id}")
-    print("✅ This avatar should work for video generation!")
-    
-    return existing_avatar_id
+try:
+    from database import Database
+    from chatbot import Chatbot, EnhancedChatbot
+    from affiliate_service import AffiliateService
+    from config import Config
+    print("✅ All imports successful")
+except ImportError as e:
+    print(f"❌ Import error: {e}")
+    sys.exit(1)
 
-def test_new_avatar_creation(image_path, token):
-    """Test creating a new avatar with your 109 credits"""
-    print(f"🎭 Testing new avatar creation with: {image_path}")
+def debug_affiliate_connections():
+    """Debug affiliate connections and product recommendations"""
+    print("🔍 Starting affiliate connection debug...")
     
-    if not os.path.exists(image_path):
-        print(f"❌ Image not found: {image_path}")
-        return None
+    # Initialize database
+    try:
+        db = Database()
+        print("✅ Database connected")
+    except Exception as e:
+        print(f"❌ Database connection failed: {e}")
+        return
+    
+    # Initialize chatbot
+    try:
+        chatbot = EnhancedChatbot(db=db)
+        print("✅ EnhancedChatbot initialized")
+    except Exception as e:
+        print(f"❌ EnhancedChatbot failed, trying basic Chatbot: {e}")
+        try:
+            chatbot = Chatbot(db)
+            print("⚠️ Using basic Chatbot")
+        except Exception as e2:
+            print(f"❌ All chatbot initialization failed: {e2}")
+            return
+    
+    # Check if affiliate service is available
+    if hasattr(chatbot, 'affiliate_service') and chatbot.affiliate_service:
+        print("✅ Affiliate service is available")
+        print(f"📋 Available platforms: {list(chatbot.affiliate_service.platforms.keys())}")
+    else:
+        print("❌ Affiliate service not available")
+        print("   - Check if affiliate_service.py exists")
+        print("   - Check if AffiliateService import is working")
+        return
+    
+    # Test with a specific user
+    print("\n🔍 Testing with user 'ademicho123'...")
+    
+    # Get user
+    user = db.get_influencer_by_username('ademicho123')
+    if not user:
+        print("❌ User 'ademicho123' not found")
+        return
+    
+    print(f"✅ Found user: {user['username']} (ID: {user['id']})")
+    
+    # Check affiliate links
+    try:
+        affiliate_links = db.get_affiliate_links(user['id'])
+        print(f"📊 Affiliate links found: {len(affiliate_links)}")
+        
+        for link in affiliate_links:
+            platform = link.get('platform', 'unknown')
+            is_active = link.get('is_active', False)
+            affiliate_id = link.get('affiliate_id', 'N/A')
+            print(f"   - {platform}: {'✅ Active' if is_active else '❌ Inactive'} (ID: {affiliate_id})")
+            
+    except Exception as e:
+        print(f"❌ Error getting affiliate links: {e}")
+        return
+    
+    # Test product recommendation
+    test_queries = ['recommend a laptop', 'suggest headphones', 'best phone']
+    
+    for query in test_queries:
+        print(f"\n🛒 Testing query: '{query}'")
+        
+        try:
+            # Test using affiliate service directly
+            recommendations = chatbot.affiliate_service.get_product_recommendations(
+                query=query,
+                influencer_id=user['id'],
+                limit=3
+            )
+            
+            print(f"📦 Results: {recommendations['total_found']} products from {recommendations['platforms_searched']} platforms")
+            
+            if recommendations['products']:
+                for i, product in enumerate(recommendations['products'][:2], 1):
+                    print(f"   {i}. {product['name']} - ${product['price']:.2f} ({product.get('platform', 'unknown')})")
+            else:
+                print("   No products found")
+                
+        except Exception as e:
+            print(f"❌ Product search failed: {e}")
+    
+    # Test comprehensive chat response
+    print(f"\n💬 Testing comprehensive chat response...")
     
     try:
-        with open(image_path, 'rb') as f:
-            files = {'file': f}
-            
-            response = requests.post(
-                f"{API_BASE_URL}/avatar/create",
-                headers={'Authorization': f'Bearer {token}'},
-                files=files,
-                timeout=120
+        if hasattr(chatbot, 'get_comprehensive_chat_response'):
+            response = chatbot.get_comprehensive_chat_response(
+                message="recommend a computer",
+                influencer_id=user['id'],
+                session_id="debug_session",
+                influencer_name=user['username'],
+                voice_mode=False,
+                video_mode=False
             )
-        
-        print(f"📤 Response: {response.status_code}")
-        
-        if response.status_code == 201:
-            data = response.json()
-            if data.get('status') == 'success':
-                avatar_id = data['data']['avatar_id']
-                print(f"🎉 SUCCESS! New avatar created: {avatar_id}")
-                return avatar_id
-            else:
-                print(f"❌ Error: {data.get('message')}")
-        else:
-            print(f"❌ HTTP Error: {response.status_code}")
-            try:
-                error_data = response.json()
-                print(f"   Error details: {error_data}")
-            except:
-                print(f"   Response text: {response.text}")
-        
-        return None
-        
-    except Exception as e:
-        print(f"❌ Exception: {str(e)}")
-        return None
-
-def main():
-    print("🎯 Avatar Creation Test")
-    print("=" * 40)
-    
-    # Test 1: Use existing avatar
-    existing_avatar = test_with_existing_avatar()
-    
-    # Test 2: Create new avatar (if you want)
-    print(f"\n🆕 Want to create a new avatar with your 109 credits?")
-    token = input("Enter your auth token (or press Enter to skip): ").strip()
-    
-    if token:
-        image_path = input("Enter path to image file: ").strip().strip('"')
-        
-        if image_path:
-            new_avatar = test_new_avatar_creation(image_path, token)
             
-            if new_avatar:
-                print(f"\n🎉 Both avatars available:")
-                print(f"   Existing: {existing_avatar}")
-                print(f"   New: {new_avatar}")
+            print(f"✅ Comprehensive response generated:")
+            print(f"   - Text length: {len(response['text'])} chars")
+            print(f"   - Products included: {response.get('products_included', False)}")
+            print(f"   - Knowledge enhanced: {response.get('knowledge_enhanced', False)}")
+            print(f"   - Response preview: {response['text'][:100]}...")
+            
         else:
-            print("No image provided, skipping new avatar creation")
-    else:
-        print("No token provided, skipping new avatar creation")
-    
-    print(f"\n✅ You have working avatars ready for video generation!")
+            print("❌ get_comprehensive_chat_response method not available")
+            
+    except Exception as e:
+        print(f"❌ Comprehensive chat test failed: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
-    main()
+    debug_affiliate_connections()

@@ -9,8 +9,10 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from sentence_transformers import SentenceTransformer
 import numpy as np
-
+import logging
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 # Import the affiliate service
 try:
@@ -27,6 +29,18 @@ try:
 except ImportError:
     RAG_AVAILABLE = False
     print("⚠️ RAGProcessor not available. Knowledge features will be limited.")
+
+def is_product_query_simple(message):
+    """Simple product query detection for immediate fix"""
+    product_keywords = [
+        'recommend', 'suggestion', 'what should i buy', 'best product', 
+        'looking for', 'need help choosing', 'product', 'buy', 'purchase',
+        'shopping', 'recommendation', 'suggest', 'find', 'help me find',
+        'computer', 'laptop', 'phone', 'headphones', 'camera'
+    ]
+    
+    message_lower = message.lower()
+    return any(keyword in message_lower for keyword in product_keywords)
 
 class EnhancedChatbot:
     """Enhanced chatbot with knowledge base, affiliate integration, and voice capabilities"""
@@ -52,7 +66,7 @@ class EnhancedChatbot:
             self.rag_processor = None
 
     def get_comprehensive_chat_response(self, message, influencer_id=None, session_id=None, 
-                                      influencer_name=None, voice_mode=False, video_mode=True):
+                                    influencer_name=None, voice_mode=False, video_mode=True):
         """MAIN METHOD: Comprehensive chat response with all features"""
         try:
             print(f"🤖 Processing comprehensive chat for {influencer_name}: {message[:50]}...")
@@ -70,6 +84,9 @@ class EnhancedChatbot:
                 voice_mode=voice_mode
             )
             
+            # Determine if products were included
+            products_included = self._is_product_query(message) and self.affiliate_service and influencer_id
+            
             # Prepare response data
             response_data = {
                 'text': text_response,
@@ -79,7 +96,7 @@ class EnhancedChatbot:
                 'has_avatar': False,
                 'voice_id': Config.DEFAULT_VOICE_ID,
                 'knowledge_enhanced': True,
-                'products_included': self._is_product_query(message),
+                'products_included': products_included,
                 'influencer': {
                     'username': influencer_name or 'AI Assistant',
                     'bio': '',
@@ -100,27 +117,8 @@ class EnhancedChatbot:
                     'expertise': influencer.get('expertise', ''),
                     'personality': influencer.get('personality', '')
                 }
-                
-                # FIXED: Generate audio response using correct voice
-                if voice_mode and not video_mode:
-                    audio_url = self.generate_audio_response(
-                        text_response, 
-                        response_data['voice_id']
-                    )
-                    if audio_url:
-                        response_data['audio_url'] = audio_url
-                
-                # Generate video response if avatar is available and video mode is enabled
-                if video_mode and response_data['has_avatar']:
-                    video_url = self.generate_enhanced_video_response(
-                        text_response,
-                        influencer_id,
-                        response_data['voice_id']
-                    )
-                    if video_url:
-                        response_data['video_url'] = video_url
             
-            print(f"✅ Comprehensive response generated: Text={len(response_data['text'])}chars, Video={bool(response_data.get('video_url'))}, Audio={bool(response_data.get('audio_url'))}")
+            print(f"✅ Comprehensive response generated with products: {products_included}")
             return response_data
             
         except Exception as e:
@@ -138,200 +136,261 @@ class EnhancedChatbot:
             }
 
     def get_chat_response_with_complete_knowledge(self, message, influencer_id=None, session_id=None, 
-                                       influencer_name=None, db=None, voice_mode=False):
-        """FIXED: Generate chat response with COMPLETE knowledge integration and product recommendations"""
+                                                influencer_name=None, db=None, voice_mode=False):
+        """Enhanced chat response with proper affiliate product integration"""
         try:
-            # Initialize contexts
             knowledge_context = ""
             personal_context = ""
             product_recommendations = ""
+            products_included = False
             
-            if db and influencer_id:
-                # FIXED: Get comprehensive personal information
-                try:
-                    personal_info = db.get_personal_knowledge(influencer_id)
-                    if personal_info:
-                        personal_parts = []
-                        if personal_info.get('bio'):
-                            personal_parts.append(f"Bio: {personal_info['bio']}")
-                        if personal_info.get('expertise'):
-                            personal_parts.append(f"Areas of expertise: {personal_info['expertise']}")
-                        if personal_info.get('personality'):
-                            personal_parts.append(f"Communication style: {personal_info['personality']}")
-                        
-                        if personal_parts:
-                            personal_context = f"\n\nYour personal information:\n" + "\n".join(personal_parts)
-                            print(f"✅ Personal context loaded: {len(personal_context)} characters")
-                except Exception as e:
-                    print(f"Error getting personal info: {e}")
+            # STEP 1: Check if this is a product query
+            if self._is_product_query(message):
+                logger.info(f"🛒 PRODUCT QUERY DETECTED: {message[:50]}...")
                 
-                # FIXED: Get knowledge from uploaded documents using RAG
-                try:
-                    if self.rag_processor:
-                        knowledge_results = self.rag_processor.query_knowledge(influencer_id, message, top_k=5)
-                        
-                        if knowledge_results:
-                            relevant_chunks = []
-                            for result in knowledge_results:
-                                if result['similarity'] > 0.4:  # Lowered threshold for better retrieval
-                                    relevant_chunks.append(f"From {result['filename']}: {result['chunk_text']}")
-                            
-                            if relevant_chunks:
-                                knowledge_context = f"\n\nRelevant information from your knowledge documents:\n" + "\n".join(relevant_chunks)
-                                print(f"✅ Knowledge context loaded: {len(knowledge_context)} characters from {len(relevant_chunks)} chunks")
-                        
-                except Exception as e:
-                    print(f"Knowledge search error: {e}")
-                    # FALLBACK: Try database knowledge search if RAG fails
+                if self.affiliate_service and influencer_id:
                     try:
-                        if hasattr(db, 'search_knowledge_base'):
-                            # Generate simple embedding for fallback search
-                            if self.embedding_model is None:
-                                self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-                            
-                            query_embedding = self.embedding_model.encode([message])[0].tolist()
-                            knowledge_results = db.search_knowledge_base(influencer_id, query_embedding, limit=3)
-                            
-                            if knowledge_results:
-                                relevant_chunks = []
-                                for result in knowledge_results:
-                                    if result['similarity'] > 0.3:
-                                        relevant_chunks.append(f"From {result['document_name']}: {result['text']}")
-                                
-                                if relevant_chunks:
-                                    knowledge_context = f"\n\nRelevant information from your knowledge base:\n" + "\n".join(relevant_chunks)
-                                    print(f"✅ Fallback knowledge context loaded: {len(relevant_chunks)} chunks")
-                    except Exception as fallback_error:
-                        print(f"Fallback knowledge search also failed: {fallback_error}")
-            
-            # FIXED: Check if this is a product-related query and get recommendations
-            if self._is_product_query(message) and self.affiliate_service and influencer_id:
-                try:
-                    recommendations = self.affiliate_service.get_product_recommendations(
-                        query=message,
-                        influencer_id=influencer_id,
-                        limit=3
-                    )
-                    
-                    if recommendations['products']:
-                        product_recommendations = ProductRecommendationFormatter.format_recommendations(
-                            recommendations['products']
+                        recommendations = self.affiliate_service.get_product_recommendations(
+                            query=message,
+                            influencer_id=influencer_id,
+                            limit=3
                         )
-                        print(f"✅ Product recommendations loaded: {len(recommendations['products'])} products")
-                except Exception as e:
-                    print(f"Product recommendation error: {e}")
-                    # FALLBACK: Generate AI-based product recommendations
-                    try:
+                        
+                        if recommendations and recommendations.get('products'):
+                            logger.info(f"✅ Found {len(recommendations['products'])} affiliate products")
+                            product_recommendations = ProductRecommendationFormatter.format_recommendations(
+                                recommendations['products'],
+                                {'platform_name': 'Rakuten Advertising'}
+                            )
+                            products_included = True
+                        else:
+                            logger.info("📝 No affiliate products found, generating AI recommendations")
+                            product_recommendations = self.get_ai_product_recommendations(message, influencer_id)
+                            products_included = True
+                            
+                    except Exception as e:
+                        logger.error(f"Affiliate product search error: {e}")
                         product_recommendations = self.get_ai_product_recommendations(message, influencer_id)
-                        if product_recommendations:
-                            print(f"✅ AI product recommendations generated as fallback")
-                    except Exception as ai_error:
-                        print(f"AI product recommendations also failed: {ai_error}")
+                        products_included = True
+                else:
+                    logger.info("⚠️ No affiliate service, generating AI recommendations")
+                    product_recommendations = self.get_ai_product_recommendations(message, influencer_id or 'unknown')
+                    products_included = True
             
-            # Create enhanced system prompt
-            system_prompt = self._build_enhanced_system_prompt(
-                influencer_name, personal_context, knowledge_context, voice_mode
-            )
+            # STEP 2: Get personal context
+            if db and influencer_id:
+                influencer = db.get_influencer(influencer_id)
+                if influencer:
+                    personal_parts = []
+                    if influencer.get('bio'):
+                        personal_parts.append(f"About me: {influencer['bio']}")
+                    if influencer.get('expertise'):
+                        personal_parts.append(f"Expertise: {influencer['expertise']}")
+                    if influencer.get('personality'):
+                        personal_parts.append(f"Personality: {influencer['personality']}")
+                    personal_context = "\n".join(personal_parts)
             
-            # Generate response using OpenAI
+            # STEP 3: Get knowledge context (if RAG available)
+            if self.rag_processor and influencer_id:
+                try:
+                    if hasattr(self.rag_processor, 'search_knowledge'):
+                        knowledge_results = self.rag_processor.search_knowledge(message, influencer_id)
+                        if knowledge_results:
+                            knowledge_context = "\n".join([chunk['content'] for chunk in knowledge_results])
+                    else:
+                        logger.warning("⚠️ RAGProcessor lacks search_knowledge method, skipping knowledge search")
+                except Exception as e:
+                    logger.error(f"RAG search error: {e}")
+            
+            # STEP 4: Generate base response
+            prompt = f"""You are {influencer_name or 'AI Assistant'}, a helpful influencer.
+            User asked: {message}
+            Personal context: {personal_context}
+            Knowledge context: {knowledge_context}
+            Respond naturally and helpfully. If products were requested, include this at the end:
+            {product_recommendations}
+            """
+            
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": message}
+                    {"role": "system", "content": "You are a helpful influencer assistant."},
+                    {"role": "user", "content": prompt}
                 ],
-                max_tokens=600 if voice_mode else 500,
+                max_tokens=500,
                 temperature=0.7
             )
             
-            ai_response = response.choices[0].message.content.strip()
+            text_response = response.choices[0].message.content.strip()
             
-            # Add product recommendations if available
-            if product_recommendations:
-                ai_response += f"\n\n{product_recommendations}"
+            # Ensure product recommendations are included
+            if products_included and product_recommendations and product_recommendations not in text_response:
+                text_response += "\n\n" + product_recommendations
             
-            print(f"✅ AI response generated: {len(ai_response)} characters")
-            return ai_response
+            logger.info(f"✅ Generated response: {text_response[:100]}...")
+            return text_response
             
         except Exception as e:
-            print(f"❌ Enhanced chat response error: {str(e)}")
+            logger.error(f"❌ Chat response error: {e}")
             return self.get_fallback_response(message, influencer_name)
+
+    def _is_simple_product_query(self, message):
+        """Detect simple product queries that don't need knowledge context"""
+        simple_product_phrases = [
+            'product recommendation', 'what product', 'recommend a product',
+            'suggest product', 'best product', 'product for', 'buy product',
+            'recommend products', 'product suggestions'
+        ]
+        
+        message_lower = message.lower().strip()
+        return any(phrase in message_lower for phrase in simple_product_phrases)   
+
+    def _format_product_recommendations(self, products: List[Dict]) -> str:
+        """FIXED: Format product recommendations for chat display"""
+        if not products:
+            return ""
+        
+        formatted = "\n\n🛍️ **Here are some great products I found:**\n\n"
+        
+        for i, product in enumerate(products[:3], 1):
+            price_str = f"${product['price']:.2f}" if product.get('price', 0) > 0 else "See price"
+            rating_str = f"⭐ {product['rating']:.1f}" if product.get('rating', 0) > 0 else ""
+            
+            formatted += f"**{i}. {product.get('name', 'Product')}**\n"
+            formatted += f"💰 {price_str}"
+            
+            if rating_str:
+                formatted += f" | {rating_str}"
+            
+            if product.get('shop_name'):
+                formatted += f" | 🏪 {product['shop_name']}"
+            
+            if product.get('description'):
+                description = product['description'][:150] + "..." if len(product['description']) > 150 else product['description']
+                formatted += f"\n📝 {description}\n"
+            
+            if product.get('affiliate_url'):
+                formatted += f"🔗 [View Product]({product['affiliate_url']})\n\n"
+            else:
+                formatted += "\n"
+        
+        formatted += f"💡 *Found these through my affiliate partnerships. I may earn a small commission if you make a purchase.*\n"
+        
+        return formatted
     
-    def _build_enhanced_system_prompt(self, influencer_name, personal_context, knowledge_context, voice_mode=False):
-        """Build an enhanced system prompt with comprehensive knowledge integration"""
+    def _build_enhanced_system_prompt(self, influencer_name, personal_context, knowledge_context, voice_mode=False, has_products=False):
+        """Build enhanced system prompt with product awareness"""
         base_name = influencer_name or "the influencer"
+        
+        product_instructions = ""
+        if has_products:
+            product_instructions = """
+    PRODUCT RECOMMENDATION MODE:
+    - You are providing specific product recommendations
+    - Introduce the products naturally and enthusiastically  
+    - Explain why these specific products are great choices
+    - Be genuine and helpful in your recommendations
+    - Show expertise and personal touch in your suggestions
+    - Mention that you've found some specific options for them
+    """
         
         voice_instructions = ""
         if voice_mode:
             voice_instructions = """
-VOICE RESPONSE GUIDELINES:
-- Keep responses conversational and natural for voice output
-- Use shorter sentences and clearer pronunciation  
-- Avoid complex punctuation that doesn't translate well to speech
-- Include natural pauses with commas and periods
-- Be more expressive and engaging since this will be spoken
-- Limit response to 3-4 sentences for optimal voice delivery
-- Use simple, everyday language that sounds natural when spoken
-"""
+    VOICE RESPONSE GUIDELINES:
+    - Keep responses conversational and natural for voice output
+    - Use shorter sentences and clearer pronunciation  
+    - Be more expressive and engaging since this will be spoken
+    - Limit response to 3-4 sentences for optimal voice delivery
+    """
         
-        system_prompt = f"""You are an AI assistant representing {base_name}. You help users by providing helpful, engaging, and personalized responses based on your knowledge and expertise.
+        system_prompt = f"""You are an AI assistant representing {base_name}. You help users by providing helpful, engaging, and personalized responses.
 
-CORE INSTRUCTIONS:
-- Be conversational, friendly, and authentic
-- Provide helpful and accurate information based on your knowledge
-- When users ask for product recommendations, suggest specific items that would genuinely help
-- Stay true to the personality and communication style described below
-- Use your knowledge base information when it's relevant to the user's question
-- Reference your expertise areas when applicable
-- If you don't know something specific, be honest about it
-- Be concise but informative (2-4 sentences usually)
+    CORE INSTRUCTIONS:
+    - Be conversational, friendly, and authentic
+    - Provide helpful and accurate information based on your knowledge
+    - When users ask for product recommendations, provide specific, helpful suggestions
+    - Stay true to the personality and expertise described below
+    - Use your knowledge base information when it's relevant to the user's question
+    - Be solution-oriented and genuinely helpful
 
-{voice_instructions}
+    {product_instructions}
 
-{personal_context}
+    {voice_instructions}
 
-{knowledge_context}
+    {personal_context}
 
-KNOWLEDGE USAGE GUIDELINES:
-- When you have relevant information from your knowledge documents, use it naturally in your responses
-- Reference specific documents or sources when appropriate ("Based on my knowledge about...")
-- Combine your personal knowledge with uploaded document information
-- If the user's question relates to your expertise areas, leverage that information
-- Use your personality traits to guide how you communicate
+    {knowledge_context}
 
-PRODUCT RECOMMENDATION GUIDELINES:
-- Only recommend products when the user explicitly asks for recommendations or mentions needing something
-- Be specific and helpful with product suggestions
-- Focus on quality and relevance over quantity
-- Include brief explanations of why you're recommending specific items
-- If you recommend products, use natural language like "I'd suggest..." or "You might like..."
-- Base recommendations on your expertise and knowledge when possible
+    RESPONSE STYLE:
+    - Use a natural, conversational tone that matches your personality
+    - Be helpful and solution-oriented
+    - Reference your knowledge and expertise when relevant
+    - Keep responses engaging and personable
+    - Show genuine enthusiasm when helping with recommendations
+    - Be specific and actionable in your advice
 
-RESPONSE STYLE:
-- Use a natural, conversational tone that matches your defined personality
-- Be helpful and solution-oriented
-- Reference your knowledge and expertise when relevant
-- Keep responses engaging and personable
-- Show your expertise naturally without being boastful
-
-Remember: You are representing {base_name}, so respond as if you are them, using their knowledge, personality, and expertise to provide the most helpful and authentic response possible."""
+    Remember: You are representing {base_name}, so respond as them, using their knowledge, personality, and expertise to provide the most helpful and authentic response possible."""
 
         return system_prompt
     
     def _is_product_query(self, message):
-        """Enhanced product query detection"""
+        """FIXED: Enhanced product query detection with more keywords"""
         product_keywords = [
-            'recommend', 'suggestion', 'what should i buy', 'best product', 
-            'looking for', 'need help choosing', 'what do you think about',
-            'review', 'opinion', 'should i get', 'worth buying', 'alternatives',
-            'shopping', 'purchase', 'need to buy', 'want to get', 'help me find',
-            'product for', 'good option', 'best choice', 'compare', 'vs',
-            'cheap', 'affordable', 'expensive', 'price', 'cost', 'budget',
-            'where to buy', 'which brand', 'top rated', 'most popular'
+            # Direct product requests
+            'recommend', 'recommendation', 'suggest', 'suggestion', 'product', 'products',
+            
+            # Shopping intent
+            'buy', 'purchase', 'shopping', 'shop', 'get', 'need', 'want', 'looking for',
+            
+            # Comparison and choice
+            'best', 'top', 'good', 'better', 'compare', 'vs', 'versus', 'choice', 'option',
+            
+            # Specific phrases
+            'what should i buy', 'help me find', 'which one', 'what do you think',
+            'worth buying', 'should i get', 'alternatives', 'similar to',
+            
+            # Price and value
+            'cheap', 'affordable', 'expensive', 'price', 'cost', 'budget', 'deal', 'sale',
+            
+            # Reviews and opinions
+            'review', 'opinion', 'thoughts on', 'experience with', 'worth it',
+            
+            # Categories (add more as needed)
+            'laptop', 'phone', 'camera', 'headphones', 'shoes', 'clothes', 'book', 'game'
         ]
         
         message_lower = message.lower()
-        return any(keyword in message_lower for keyword in product_keywords)
+        
+        # Check if any product keyword is in the message
+        has_product_keyword = any(keyword in message_lower for keyword in product_keywords)
+        
+        # Additional checks for product intent
+        question_indicators = ['what', 'which', 'how', 'where', 'should i']
+        has_question = any(indicator in message_lower for indicator in question_indicators)
+        
+        # Strong product indicators
+        strong_indicators = [
+            'product recommendation', 'recommend a', 'suggest a', 'best for',
+            'help me choose', 'what to buy', 'should i buy', 'looking to buy'
+        ]
+        has_strong_indicator = any(indicator in message_lower for indicator in strong_indicators)
+        
+        # If it has strong indicators, definitely a product query
+        if has_strong_indicator:
+            return True
+        
+        # If it has product keywords and question words, likely a product query
+        if has_product_keyword and has_question:
+            return True
+        
+        # Check for specific product request patterns
+        product_patterns = [
+            'recommend', 'suggest', 'best', 'good', 'help me find', 'looking for',
+            'what should i', 'which', 'need a', 'want a'
+        ]
+        
+        return any(pattern in message_lower for pattern in product_patterns)
 
     def get_ai_product_recommendations(self, query: str, influencer_id: str) -> str:
         """FIXED: Generate AI-based product recommendations with affiliate integration"""
@@ -351,16 +410,16 @@ Remember: You are representing {base_name}, so respond as if you are them, using
             
             prompt = f"""You are helping an influencer recommend products related to: {query}
 
-Generate 3 realistic, specific product recommendations that would be relevant.
-For each product, provide:
-- A specific product name
-- A realistic price range  
-- A brief compelling description (1-2 sentences)
-- Why it's relevant to the query
+    Generate 3 realistic, specific product recommendations that would be relevant.
+    For each product, provide:
+    - A specific product name
+    - A realistic price range  
+    - A brief compelling description (1-2 sentences)
+    - Why it's relevant to the query
 
-Format as a natural, engaging response that feels like personal recommendations.{platform_context}
+    Format as a natural, engaging response that feels like personal recommendations.{platform_context}
 
-Start with a friendly introduction like "Here are some great options I'd recommend:" """
+    Start with a friendly introduction like "Here are some great options I'd recommend:" """
             
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -377,12 +436,15 @@ Start with a friendly introduction like "Here are some great options I'd recomme
             # Add affiliate context if available
             if affiliate_platforms:
                 ai_response += f"\n\n💡 *I can help you find these products through my partner networks. Let me know what interests you most!*"
+            else:
+                ai_response += f"\n\n💡 *These are general recommendations. I'm working on connecting affiliate partners to bring you specific deals!*"
             
+            print(f"✅ AI product recommendations generated: {len(ai_response)} characters")
             return ai_response
             
         except Exception as e:
-            print(f"AI product recommendation error: {str(e)}")
-            return f"I'd be happy to help you find products related to {query}! Let me know what specific features or budget you have in mind."
+            print(f"❌ AI product recommendations error: {e}")
+            return f"I'd love to help you find great {query} options! What specific features or budget are you considering?"
 
     # FIXED: Voice generation methods with correct signatures
     def generate_audio_response(self, text_response, voice_id=None):
@@ -707,6 +769,40 @@ Start with a friendly introduction like "Here are some great options I'd recomme
         
         import random
         return random.choice(fallback_responses)
+    
+    def get_emergency_product_response(self, message, influencer_name):
+        """Emergency product response when affiliate service fails"""
+        try:
+            client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
+            
+            prompt = f"""You are {influencer_name}, helping someone with product recommendations for: {message}
+
+    Generate 3 realistic, specific product recommendations. For each:
+    - Specific product name
+    - Realistic price range  
+    - Brief compelling description
+    - Why it's relevant
+
+    Format as natural, engaging recommendations. Start with "Here are some great options I'd recommend:"""
+            
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": f"You are {influencer_name}, a helpful influencer who gives product recommendations."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=400,
+                temperature=0.7
+            )
+            
+            ai_response = response.choices[0].message.content.strip()
+            ai_response += "\n\n💡 *These are general recommendations. I'm working on getting you the best deals through my affiliate partnerships!*"
+            
+            return ai_response
+            
+        except Exception as e:
+            print(f"Emergency product response error: {e}")
+            return f"I'd love to help you find great {message.lower()} options! What specific features or budget are you considering?"
 
 # FIXED: Backwards compatibility
 class Chatbot(EnhancedChatbot):

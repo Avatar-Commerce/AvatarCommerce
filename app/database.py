@@ -404,20 +404,91 @@ class Database:
             return False
 
     def get_personal_knowledge(self, influencer_id: str) -> Optional[Dict]:
-        """Get personal knowledge information from influencer profile"""
+        """FIXED: Get personal knowledge information from influencer profile"""
         try:
             influencer = self.get_influencer(influencer_id)
             if not influencer:
+                logger.warning(f"Influencer not found: {influencer_id}")
                 return None
             
-            return {
-                'bio': influencer.get('bio', ''),
-                'expertise': influencer.get('expertise', ''),
-                'personality': influencer.get('personality', '')
+            personal_knowledge = {
+                'bio': influencer.get('bio', '').strip(),
+                'expertise': influencer.get('expertise', '').strip(),
+                'personality': influencer.get('personality', '').strip()
             }
+            
+            # Check if we have any meaningful personal knowledge
+            has_knowledge = any(len(value) > 10 for value in personal_knowledge.values())
+            
+            if has_knowledge:
+                logger.info(f"✅ Personal knowledge retrieved for {influencer_id}")
+                # Log what type of knowledge we have
+                knowledge_types = [key for key, value in personal_knowledge.items() if len(value) > 10]
+                logger.info(f"📝 Available personal knowledge: {', '.join(knowledge_types)}")
+                return personal_knowledge
+            else:
+                logger.info(f"📝 No meaningful personal knowledge found for {influencer_id}")
+                return None
+            
         except Exception as e:
             logger.error(f"Error getting personal knowledge: {e}")
             return None
+
+    def get_knowledge_stats(self, influencer_id: str) -> Dict:
+        """NEW: Get comprehensive knowledge statistics for an influencer"""
+        try:
+            stats = {
+                'total_documents': 0,
+                'processed_documents': 0,
+                'total_chunks': 0,
+                'searchable_documents': 0,
+                'personal_info_completeness': 0,
+                'overall_knowledge_score': 0
+            }
+            
+            # Get document stats
+            doc_response = self.supabase.table('knowledge_documents') \
+                .select('*') \
+                .eq('influencer_id', influencer_id) \
+                .execute()
+            
+            documents = doc_response.data if doc_response.data else []
+            stats['total_documents'] = len(documents)
+            stats['processed_documents'] = len([d for d in documents if d.get('is_processed')])
+            
+            # Get chunk stats
+            chunk_response = self.supabase.table('knowledge_chunks') \
+                .select('id') \
+                .eq('influencer_id', influencer_id) \
+                .execute()
+            
+            stats['total_chunks'] = len(chunk_response.data) if chunk_response.data else 0
+            stats['searchable_documents'] = len([d for d in documents if d.get('chunk_count', 0) > 0])
+            
+            # Get personal info completeness
+            personal_info = self.get_personal_knowledge(influencer_id)
+            if personal_info:
+                completeness = 0
+                if len(personal_info.get('bio', '')) > 10:
+                    completeness += 33
+                if len(personal_info.get('expertise', '')) > 10:
+                    completeness += 33
+                if len(personal_info.get('personality', '')) > 10:
+                    completeness += 34
+                stats['personal_info_completeness'] = completeness
+            
+            # Calculate overall knowledge score
+            doc_score = min(40, stats['searchable_documents'] * 10)  # Max 40 points for documents
+            personal_score = stats['personal_info_completeness'] * 0.6  # Max 60 points for personal info
+            stats['overall_knowledge_score'] = min(100, doc_score + personal_score)
+            
+            logger.info(f"📊 Knowledge stats for {influencer_id}: {stats['total_documents']} docs, {stats['total_chunks']} chunks, {stats['overall_knowledge_score']:.0f}% complete")
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Error getting knowledge stats: {e}")
+            return stats  # Return default stats
 
     def save_personal_knowledge(self, influencer_id: str, personal_data: Dict) -> bool:
         """Save personal knowledge information to influencer profile"""
@@ -437,7 +508,7 @@ class Database:
             return False
 
     def search_knowledge_base(self, influencer_id: str, query_embedding: List[float], limit: int = 5) -> List[Dict]:
-        """Search knowledge base using semantic similarity"""
+        """FIXED: Search knowledge base using semantic similarity with proper error handling"""
         try:
             # Get all chunks for the influencer
             response = self.supabase.table('knowledge_chunks') \
@@ -446,69 +517,98 @@ class Database:
                 .execute()
             
             chunks = response.data if response.data else []
+            logger.info(f"🔍 Found {len(chunks)} knowledge chunks for search")
+            
+            if not chunks:
+                return []
             
             # Calculate similarities
             similarities = []
             
             for chunk in chunks:
                 try:
-                    if chunk['embedding']:
-                        # Parse embedding from string
-                        chunk_embedding = json.loads(chunk['embedding']) if isinstance(chunk['embedding'], str) else chunk['embedding']
+                    if chunk.get('embedding'):
+                        # FIXED: Parse embedding from JSON string with multiple fallback methods
+                        chunk_embedding = None
+                        embedding_str = chunk['embedding']
                         
-                        # Calculate cosine similarity
-                        similarity = self._cosine_similarity(query_embedding, chunk_embedding)
+                        if isinstance(embedding_str, str):
+                            try:
+                                # Try JSON parsing first
+                                chunk_embedding = json.loads(embedding_str)
+                            except json.JSONDecodeError:
+                                logger.warning(f"Could not parse embedding for chunk {chunk.get('id', 'unknown')}")
+                                continue
+                        elif isinstance(embedding_str, list):
+                            chunk_embedding = embedding_str
+                        else:
+                            logger.warning(f"Unknown embedding format for chunk {chunk.get('id', 'unknown')}")
+                            continue
                         
-                        similarities.append({
-                            'chunk_id': chunk['id'],
-                            'document_id': chunk['document_id'],
-                            'text': chunk['chunk_text'],
-                            'similarity': float(similarity),
-                            'chunk_index': chunk['chunk_index'],
-                            'document_name': chunk['knowledge_documents']['filename'] if chunk['knowledge_documents'] else 'Unknown'
-                        })
-                        
+                        if chunk_embedding and len(chunk_embedding) == len(query_embedding):
+                            # Calculate cosine similarity
+                            similarity = self._cosine_similarity_improved(query_embedding, chunk_embedding)
+                            
+                            if similarity > 0.1:  # Only include chunks with some relevance
+                                similarities.append({
+                                    'chunk_id': chunk.get('id'),
+                                    'document_id': chunk.get('document_id'),
+                                    'text': chunk.get('chunk_text', ''),
+                                    'similarity': float(similarity),
+                                    'chunk_index': chunk.get('chunk_index', 0),
+                                    'document_name': chunk.get('knowledge_documents', {}).get('filename', 'Unknown') if chunk.get('knowledge_documents') else 'Unknown'
+                                })
+                            
                 except Exception as embedding_error:
-                    logger.error(f"Error processing embedding for chunk {chunk['id']}: {embedding_error}")
+                    logger.error(f"Error processing embedding for chunk {chunk.get('id', 'unknown')}: {embedding_error}")
                     continue
             
             # Sort by similarity and return top results
             similarities.sort(key=lambda x: x['similarity'], reverse=True)
-            return similarities[:limit]
+            top_results = similarities[:limit]
+            
+            logger.info(f"🎯 Knowledge search returned {len(top_results)} relevant chunks")
+            for result in top_results[:2]:  # Log top 2 for debugging
+                logger.info(f"   - {result['document_name']}: {result['similarity']:.3f} - {result['text'][:50]}...")
+            
+            return top_results
             
         except Exception as e:
             logger.error(f"Error searching knowledge base: {e}")
             return []
 
     def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        """Calculate cosine similarity between two vectors"""
+        """FIXED: Get all knowledge documents for an influencer with processing status"""
         try:
-            dot_product = sum(a * b for a, b in zip(vec1, vec2))
-            magnitude1 = math.sqrt(sum(a * a for a in vec1))
-            magnitude2 = math.sqrt(sum(a * a for a in vec2))
+            response = self.supabase.table('knowledge_documents') \
+                .select('*') \
+                .eq('influencer_id', influencer_id) \
+                .order('created_at', desc=True) \
+                .execute()
             
-            if magnitude1 == 0 or magnitude2 == 0:
-                return 0
+            documents = response.data if response.data else []
             
-            return dot_product / (magnitude1 * magnitude2)
+            # Enhance each document with processing info
+            for doc in documents:
+                # Check if document has chunks (is searchable)
+                chunk_response = self.supabase.table('knowledge_chunks') \
+                    .select('id') \
+                    .eq('document_id', doc['id']) \
+                    .limit(1) \
+                    .execute()
+                
+                doc['has_chunks'] = bool(chunk_response.data)
+                doc['is_searchable'] = doc.get('is_processed', False) and doc['has_chunks']
+            
+            logger.info(f"📚 Retrieved {len(documents)} knowledge documents for influencer {influencer_id}")
+            searchable_count = len([d for d in documents if d.get('is_searchable')])
+            logger.info(f"📚 {searchable_count}/{len(documents)} documents are searchable")
+            
+            return documents
+            
         except Exception as e:
-            logger.error(f"Error calculating cosine similarity: {e}")
-            return 0
-
-    def store_chat_interaction(self, interaction_data: Dict) -> bool:
-        """Store chat interaction for analytics"""
-        try:
-            # Add ID and timestamp if not present
-            if 'id' not in interaction_data:
-                interaction_data['id'] = str(uuid.uuid4())
-            if 'created_at' not in interaction_data:
-                interaction_data['created_at'] = datetime.now(timezone.utc).isoformat()
-            
-            response = self.supabase.table('chat_interactions').insert(interaction_data).execute()
-            return bool(response.data)
-        except Exception as e:
-            logger.error(f"Error storing chat interaction: {e}")
-            return False
+            logger.error(f"Error getting knowledge documents: {e}")
+            return []
 
     def get_knowledge_for_chat(self, influencer_id: str, query: str, limit: int = 3) -> Dict:
         """Get relevant knowledge for chat responses"""
@@ -871,22 +971,6 @@ class Database:
             logger.error(f"Error adding affiliate link: {str(e)}")
             return None
 
-    def get_affiliate_links(self, influencer_id: str, platform: str = None) -> List[Dict]:
-        """Get affiliate links for an influencer, optionally filtered by platform"""
-        try:
-            query = self.supabase.table('affiliate_links') \
-                .select('*') \
-                .eq('influencer_id', influencer_id)
-            
-            if platform:
-                query = query.eq('platform', platform)
-                
-            response = query.execute()
-            return response.data if response.data else []
-        except Exception as e:
-            logger.error(f"Error getting affiliate links: {str(e)}")
-            return []
-
     def get_primary_affiliate_link(self, influencer_id: str) -> Optional[Dict]:
         """Get the primary affiliate link for an influencer"""
         try:
@@ -919,19 +1003,6 @@ class Database:
             return len(response.data) > 0
         except Exception as e:
             logger.error(f"Error setting primary affiliate link: {str(e)}")
-            return False
-
-    def delete_affiliate_link(self, influencer_id: str, platform: str) -> bool:
-        """Delete an affiliate link"""
-        try:
-            self.supabase.table('affiliate_links') \
-                .delete() \
-                .eq('influencer_id', influencer_id) \
-                .eq('platform', platform) \
-                .execute()
-            return True
-        except Exception as e:
-            logger.error(f"Error deleting affiliate link: {str(e)}")
             return False
 
     # =============================================================================
@@ -1086,99 +1157,100 @@ class Database:
             print(f"❌ Database error storing chat interaction: {e}")
             return None
 
-    def get_affiliate_links(self, influencer_id: str) -> List[Dict]:
-        """Get all affiliate links for an influencer"""
-        try:
-            response = self.supabase.table('affiliate_links') \
-                .select('*') \
-                .eq('influencer_id', influencer_id) \
-                .eq('is_active', True) \
-                .execute()
-            
-            return response.data if response.data else []
-        except Exception as e:
-            logger.error(f"Error getting affiliate links: {e}")
-            return []
-
-    def get_affiliate_link_by_platform(self, influencer_id: str, platform: str) -> Optional[Dict]:
-        """Get a specific affiliate link by platform"""
-        try:
-            response = self.supabase.table('affiliate_links') \
-                .select('*') \
-                .eq('influencer_id', influencer_id) \
-                .eq('platform', platform) \
-                .limit(1) \
-                .execute()
-            
-            return response.data[0] if response.data else None
-        except Exception as e:
-            logger.error(f"Error getting affiliate link by platform: {e}")
-            return None
-
     def create_affiliate_link(self, affiliate_data: Dict) -> bool:
-        """Create a new affiliate link"""
+        """FIXED: Create affiliate link with comprehensive validation"""
         try:
-            # Ensure ID is a string (not UUID object)
-            if 'id' in affiliate_data:
-                affiliate_data['id'] = str(affiliate_data['id'])
+            # Validate required fields
+            required_fields = ['id', 'influencer_id', 'platform']
+            missing_fields = [field for field in required_fields if not affiliate_data.get(field)]
             
-            # Ensure influencer_id is a string
-            if 'influencer_id' in affiliate_data:
-                affiliate_data['influencer_id'] = str(affiliate_data['influencer_id'])
+            if missing_fields:
+                logger.error(f"Missing required fields: {', '.join(missing_fields)}")
+                return False
             
-            response = self.supabase.table('affiliate_links') \
-                .insert(affiliate_data) \
+            # Add timestamps if not present
+            if 'created_at' not in affiliate_data:
+                affiliate_data['created_at'] = datetime.now(timezone.utc).isoformat()
+            if 'updated_at' not in affiliate_data:
+                affiliate_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+            
+            # Set default values
+            if 'is_active' not in affiliate_data:
+                affiliate_data['is_active'] = True
+            
+            # Log what we're trying to insert
+            logger.info(f"💾 Creating affiliate link: {affiliate_data['platform']} for {affiliate_data['influencer_id']}")
+            logger.info(f"📝 Data fields: {list(affiliate_data.keys())}")
+            
+            # Check for existing platform
+            existing = self.supabase.table('affiliate_links') \
+                .select('id') \
+                .eq('influencer_id', affiliate_data['influencer_id']) \
+                .eq('platform', affiliate_data['platform']) \
                 .execute()
             
-            return bool(response.data)
+            if existing.data:
+                logger.error(f"❌ Platform {affiliate_data['platform']} already exists for user")
+                return False
+            
+            # Insert into database
+            response = self.supabase.table('affiliate_links').insert(affiliate_data).execute()
+            
+            if response.data and len(response.data) > 0:
+                logger.info(f"✅ Affiliate link created successfully: {response.data[0]['id']}")
+                return True
+            else:
+                logger.error(f"❌ Failed to create affiliate link - no data returned")
+                return False
+                
         except Exception as e:
-            logger.error(f"Error creating affiliate link: {e}")
-            print(f"Affiliate data causing error: {affiliate_data}")  # Debug info
+            logger.error(f"❌ Error creating affiliate link: {e}")
             return False
-
-    def update_affiliate_link(self, influencer_id: str, platform: str, update_data: Dict) -> bool:
-        """Update an affiliate link"""
+        
+    def create_affiliate_link_enhanced(self, affiliate_data: Dict) -> bool:
+        """FIXED: Enhanced affiliate link creation with proper credential storage"""
         try:
-            response = self.supabase.table('affiliate_links') \
-                .update(update_data) \
-                .eq('influencer_id', str(influencer_id)) \
-                .eq('platform', platform) \
-                .execute()
+            logger.info(f"💾 Storing affiliate link: {affiliate_data.get('platform')} for {affiliate_data.get('influencer_id')}")
+            logger.info(f"📝 Fields to store: {list(affiliate_data.keys())}")
             
-            return bool(response.data)
+            # IMPORTANT: Make sure your Supabase table has these columns:
+            # - client_secret (for Rakuten)
+            # - rakuten_client_secret (backup field)
+            # - secret_key (for ShareASale)
+            # - amazon_secret_key (for Amazon)
+            
+            response = self.supabase.table('affiliate_links').insert(affiliate_data).execute()
+            
+            if response.data:
+                logger.info(f"✅ Affiliate link stored successfully: {response.data[0]['id']}")
+                return True
+            else:
+                logger.error("❌ No data returned from affiliate link insert")
+                return False
+                
         except Exception as e:
-            logger.error(f"Error updating affiliate link: {e}")
+            logger.error(f"❌ Database error creating affiliate link: {e}")
             return False
 
     def delete_affiliate_link(self, influencer_id: str, platform: str) -> bool:
-        """Delete an affiliate link"""
+        """FIXED: Delete an affiliate link"""
         try:
             response = self.supabase.table('affiliate_links') \
                 .delete() \
-                .eq('influencer_id', str(influencer_id)) \
+                .eq('influencer_id', influencer_id) \
                 .eq('platform', platform) \
                 .execute()
             
-            return bool(response.data)
+            if response.data and len(response.data) > 0:
+                logger.info(f"✅ Affiliate link deleted: {platform} for {influencer_id}")
+                return True
+            else:
+                logger.warning(f"⚠️ No affiliate link found to delete: {platform} for {influencer_id}")
+                return False
+                
         except Exception as e:
-            logger.error(f"Error deleting affiliate link: {e}")
+            logger.error(f"❌ Error deleting affiliate link: {e}")
             return False
-
-    def get_personal_knowledge(self, influencer_id):
-        """Get influencer's personal knowledge (bio, expertise, personality)"""
-        try:
-            response = self.supabase.table('influencers') \
-                .select('bio, expertise, personality') \
-                .eq('id', influencer_id) \
-                .execute()
-            
-            if response.data:
-                return response.data[0]
-            return None
-            
-        except Exception as e:
-            print(f"Error getting personal knowledge: {e}")
-            return None
 
     def get_knowledge_documents(self, influencer_id):
         """Get all knowledge documents for an influencer"""
@@ -1195,100 +1267,27 @@ class Database:
             print(f"Error getting knowledge documents: {e}")
             return []
 
-    def search_knowledge_base(self, influencer_id, query_embedding, limit=5):
-        """Search knowledge base using semantic similarity (simplified version)"""
+    def update_affiliate_link(self, influencer_id: str, platform: str, update_data: Dict) -> bool:
+        """FIXED: Update an affiliate link"""
         try:
-            # Get all knowledge chunks for the influencer
-            response = self.supabase.table('knowledge_chunks') \
-                .select('*, knowledge_documents(filename)') \
-                .eq('influencer_id', influencer_id) \
-                .execute()
+            # Add updated timestamp
+            update_data['updated_at'] = datetime.now(timezone.utc).isoformat()
             
-            chunks = response.data if response.data else []
-            
-            # For simplified version, just return recent chunks
-            # In production, you'd calculate actual semantic similarity
-            return [{
-                'text': chunk['chunk_text'],
-                'document_name': chunk['knowledge_documents']['filename'] if chunk['knowledge_documents'] else 'Document',
-                'similarity': 0.7,  # Placeholder similarity score
-                'chunk_index': chunk['chunk_index']
-            } for chunk in chunks[:limit]]
-            
-        except Exception as e:
-            print(f"Error searching knowledge base: {e}")
-            return []
-
-    def get_affiliate_links(self, influencer_id):
-        """Get all affiliate links for an influencer"""
-        try:
-            response = self.supabase.table('affiliate_links') \
-                .select('*') \
-                .eq('influencer_id', influencer_id) \
-                .execute()
-            
-            return response.data if response.data else []
-            
-        except Exception as e:
-            print(f"Error getting affiliate links: {e}")
-            return []
-
-    def get_affiliate_link_by_platform(self, influencer_id, platform):
-        """Get specific affiliate link by platform"""
-        try:
-            response = self.supabase.table('affiliate_links') \
-                .select('*') \
-                .eq('influencer_id', influencer_id) \
-                .eq('platform', platform) \
-                .execute()
-            
-            return response.data[0] if response.data else None
-            
-        except Exception as e:
-            print(f"Error getting affiliate link: {e}")
-            return None
-
-    def create_affiliate_link(self, affiliate_data):
-        """Create new affiliate link"""
-        try:
-            response = self.supabase.table('affiliate_links') \
-                .insert(affiliate_data) \
-                .execute()
-            
-            return bool(response.data)
-            
-        except Exception as e:
-            print(f"Error creating affiliate link: {e}")
-            return False
-
-    def update_affiliate_link(self, influencer_id, platform, update_data):
-        """Update affiliate link"""
-        try:
             response = self.supabase.table('affiliate_links') \
                 .update(update_data) \
                 .eq('influencer_id', influencer_id) \
                 .eq('platform', platform) \
                 .execute()
             
-            return bool(response.data)
-            
+            if response.data and len(response.data) > 0:
+                logger.info(f"✅ Affiliate link updated: {platform} for {influencer_id}")
+                return True
+            else:
+                logger.warning(f"⚠️ No affiliate link found to update: {platform} for {influencer_id}")
+                return False
+                
         except Exception as e:
-            print(f"Error updating affiliate link: {e}")
-            return False
-
-    def delete_affiliate_link(self, influencer_id, platform):
-        """Delete affiliate link"""
-        try:
-            response = self.supabase.table('affiliate_links') \
-                .delete() \
-                .eq('influencer_id', influencer_id) \
-                .eq('platform', platform) \
-                .execute()
-            
-            return bool(response.data)
-            
-        except Exception as e:
-            print(f"Error deleting affiliate link: {e}")
+            logger.error(f"❌ Error updating affiliate link: {e}")
             return False
 
     def store_chat_interaction(self, interaction_data):
@@ -1411,81 +1410,6 @@ class Database:
             logger.error(f"Error getting knowledge documents: {e}")
             return []
 
-    def search_knowledge_base(self, influencer_id: str, query_embedding: List[float], limit: int = 5) -> List[Dict]:
-        """FIXED: Search knowledge base using semantic similarity with better error handling"""
-        try:
-            # Get all chunks for the influencer
-            response = self.supabase.table('knowledge_chunks') \
-                .select('*, knowledge_documents(filename)') \
-                .eq('influencer_id', influencer_id) \
-                .execute()
-            
-            chunks = response.data if response.data else []
-            logger.info(f"🔍 Found {len(chunks)} knowledge chunks for search")
-            
-            if not chunks:
-                return []
-            
-            # Calculate similarities
-            similarities = []
-            
-            for chunk in chunks:
-                try:
-                    if chunk.get('embedding'):
-                        # Parse embedding from string with multiple fallback methods
-                        chunk_embedding = None
-                        
-                        # Try different parsing methods
-                        embedding_str = chunk['embedding']
-                        if isinstance(embedding_str, str):
-                            try:
-                                # Try JSON parsing first
-                                chunk_embedding = json.loads(embedding_str)
-                            except json.JSONDecodeError:
-                                try:
-                                    # Try eval as fallback (less secure but may work)
-                                    chunk_embedding = eval(embedding_str)
-                                except:
-                                    logger.warning(f"Could not parse embedding for chunk {chunk.get('id', 'unknown')}")
-                                    continue
-                        elif isinstance(embedding_str, list):
-                            chunk_embedding = embedding_str
-                        else:
-                            logger.warning(f"Unknown embedding format for chunk {chunk.get('id', 'unknown')}")
-                            continue
-                        
-                        if chunk_embedding and len(chunk_embedding) == len(query_embedding):
-                            # Calculate cosine similarity
-                            similarity = self._cosine_similarity(query_embedding, chunk_embedding)
-                            
-                            if similarity > 0.1:  # Only include chunks with some relevance
-                                similarities.append({
-                                    'chunk_id': chunk.get('id'),
-                                    'document_id': chunk.get('document_id'),
-                                    'text': chunk.get('chunk_text', ''),
-                                    'similarity': float(similarity),
-                                    'chunk_index': chunk.get('chunk_index', 0),
-                                    'document_name': chunk.get('knowledge_documents', {}).get('filename', 'Unknown') if chunk.get('knowledge_documents') else 'Unknown'
-                                })
-                            
-                except Exception as embedding_error:
-                    logger.error(f"Error processing embedding for chunk {chunk.get('id', 'unknown')}: {embedding_error}")
-                    continue
-            
-            # Sort by similarity and return top results
-            similarities.sort(key=lambda x: x['similarity'], reverse=True)
-            top_results = similarities[:limit]
-            
-            logger.info(f"🎯 Knowledge search returned {len(top_results)} relevant chunks")
-            for result in top_results[:3]:  # Log top 3 for debugging
-                logger.info(f"   - {result['document_name']}: {result['similarity']:.3f} - {result['text'][:50]}...")
-            
-            return top_results
-            
-        except Exception as e:
-            logger.error(f"Error searching knowledge base: {e}")
-            return []
-
     def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
         """FIXED: Calculate cosine similarity between two vectors with better error handling"""
         try:
@@ -1509,70 +1433,8 @@ class Database:
             logger.error(f"Error calculating cosine similarity: {e}")
             return 0.0
 
-    def get_personal_knowledge(self, influencer_id: str) -> Optional[Dict]:
-        """FIXED: Get personal knowledge information from influencer profile"""
-        try:
-            influencer = self.get_influencer(influencer_id)
-            if not influencer:
-                logger.warning(f"Influencer not found: {influencer_id}")
-                return None
-            
-            personal_knowledge = {
-                'bio': influencer.get('bio', ''),
-                'expertise': influencer.get('expertise', ''),
-                'personality': influencer.get('personality', '')
-            }
-            
-            # Check if we have any personal knowledge
-            has_knowledge = any(personal_knowledge.values())
-            
-            if has_knowledge:
-                logger.info(f"✅ Personal knowledge retrieved for {influencer_id}")
-                return personal_knowledge
-            else:
-                logger.info(f"📝 No personal knowledge found for {influencer_id}")
-                return None
-            
-        except Exception as e:
-            logger.error(f"Error getting personal knowledge: {e}")
-            return None
-
-    def create_affiliate_link(self, affiliate_data: Dict) -> bool:
-        """FIXED: Create affiliate link with proper validation"""
-        try:
-            # Validate required fields
-            required_fields = ['id', 'influencer_id', 'platform', 'affiliate_id']
-            for field in required_fields:
-                if field not in affiliate_data:
-                    raise ValueError(f"Missing required field: {field}")
-            
-            # Add timestamps if not present
-            if 'created_at' not in affiliate_data:
-                affiliate_data['created_at'] = datetime.now(timezone.utc).isoformat()
-            if 'updated_at' not in affiliate_data:
-                affiliate_data['updated_at'] = datetime.now(timezone.utc).isoformat()
-            
-            # Set default values
-            if 'is_active' not in affiliate_data:
-                affiliate_data['is_active'] = True
-            
-            response = self.supabase.table('affiliate_links') \
-                .insert(affiliate_data) \
-                .execute()
-            
-            if response.data and len(response.data) > 0:
-                logger.info(f"✅ Affiliate link created: {affiliate_data['platform']} for {affiliate_data['influencer_id']}")
-                return True
-            else:
-                logger.error(f"❌ Failed to create affiliate link")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error creating affiliate link: {e}")
-            return False
-
     def get_affiliate_link_by_platform(self, influencer_id: str, platform: str) -> Optional[Dict]:
-        """FIXED: Get a specific affiliate link by platform with enhanced credential retrieval"""
+        """FIXED: Get specific affiliate link by platform with enhanced credential mapping"""
         try:
             response = self.supabase.table('affiliate_links') \
                 .select('*') \
@@ -1585,19 +1447,30 @@ class Database:
             if response.data and len(response.data) > 0:
                 affiliate_link = response.data[0]
                 
-                # FIXED: Add platform-specific credential mapping for affiliate service
-                # The affiliate service expects specific field names
+                # Enhanced credential mapping for affiliate service compatibility
                 enhanced_link = dict(affiliate_link)
                 
                 if platform == 'amazon':
-                    enhanced_link['amazon_access_key'] = affiliate_link.get('amazon_access_key', '')
-                    enhanced_link['amazon_secret_key'] = affiliate_link.get('amazon_secret_key', '')
-                    enhanced_link['partner_tag'] = affiliate_link.get('affiliate_id', '')
+                    enhanced_link['amazon_access_key'] = affiliate_link.get('access_key', '')
+                    enhanced_link['amazon_secret_key'] = affiliate_link.get('secret_key', '')
+                    enhanced_link['partner_tag'] = affiliate_link.get('partner_tag', affiliate_link.get('affiliate_id', ''))
                     
                 elif platform == 'rakuten':
-                    enhanced_link['client_id'] = affiliate_link.get('rakuten_client_id', affiliate_link.get('client_id', ''))
-                    enhanced_link['client_secret'] = affiliate_link.get('rakuten_client_secret', affiliate_link.get('client_secret', ''))
-                    enhanced_link['application_id'] = affiliate_link.get('rakuten_application_id', affiliate_link.get('application_id', ''))
+                    # Map all possible Rakuten credential field names
+                    client_id = (
+                        affiliate_link.get('client_id') or 
+                        affiliate_link.get('rakuten_client_id') or 
+                        affiliate_link.get('application_id') or
+                        affiliate_link.get('affiliate_id')  # Fallback
+                    )
+                    
+                    enhanced_link['client_id'] = client_id
+                    enhanced_link['rakuten_client_id'] = client_id
+                    enhanced_link['application_id'] = client_id
+                    enhanced_link['affiliate_id'] = affiliate_link.get('affiliate_id', '')
+                    enhanced_link['client_secret'] = affiliate_link.get('client_secret', '')
+                    
+                    logger.info(f"🔑 Rakuten credentials mapped: client_id={client_id[:10] if client_id else 'missing'}...")
                     
                 elif platform == 'shareasale':
                     enhanced_link['shareasale_api_token'] = affiliate_link.get('api_token', '')
@@ -1619,11 +1492,11 @@ class Database:
                 return None
                 
         except Exception as e:
-            logger.error(f"Error getting affiliate link by platform: {e}")
+            logger.error(f"❌ Error getting affiliate link by platform: {e}")
             return None
 
     def get_affiliate_links(self, influencer_id: str) -> List[Dict]:
-        """FIXED: Get all affiliate links for an influencer with enhanced data"""
+        """FIXED: Get all affiliate links for an influencer"""
         try:
             response = self.supabase.table('affiliate_links') \
                 .select('*') \
@@ -1633,72 +1506,24 @@ class Database:
             
             affiliate_links = response.data if response.data else []
             
-            # Enhance each link with platform-specific data
-            enhanced_links = []
+            # Add platform display names
+            platform_names = {
+                'amazon': 'Amazon Associates',
+                'rakuten': 'Rakuten Advertising', 
+                'shareasale': 'ShareASale',
+                'cj_affiliate': 'CJ Affiliate',
+                'skimlinks': 'Skimlinks'
+            }
+            
             for link in affiliate_links:
-                enhanced_link = dict(link)
-                
-                # Add platform display names
-                platform_names = {
-                    'amazon': 'Amazon Associates',
-                    'rakuten': 'Rakuten Advertising', 
-                    'shareasale': 'ShareASale',
-                    'cj_affiliate': 'CJ Affiliate',
-                    'skimlinks': 'Skimlinks'
-                }
-                
-                enhanced_link['platform_name'] = platform_names.get(link['platform'], link['platform'].title())
-                enhanced_links.append(enhanced_link)
+                link['platform_name'] = platform_names.get(link['platform'], link['platform'].title())
             
-            logger.info(f"✅ Retrieved {len(enhanced_links)} affiliate links for {influencer_id}")
-            return enhanced_links
+            logger.info(f"✅ Retrieved {len(affiliate_links)} affiliate links for {influencer_id}")
+            return affiliate_links
             
         except Exception as e:
-            logger.error(f"Error getting affiliate links: {e}")
+            logger.error(f"❌ Error getting affiliate links: {e}")
             return []
-
-    def update_affiliate_link(self, influencer_id: str, platform: str, update_data: Dict) -> bool:
-        """FIXED: Update an affiliate link"""
-        try:
-            # Add updated timestamp
-            update_data['updated_at'] = datetime.now(timezone.utc).isoformat()
-            
-            response = self.supabase.table('affiliate_links') \
-                .update(update_data) \
-                .eq('influencer_id', influencer_id) \
-                .eq('platform', platform) \
-                .execute()
-            
-            if response.data and len(response.data) > 0:
-                logger.info(f"✅ Affiliate link updated: {platform} for {influencer_id}")
-                return True
-            else:
-                logger.warning(f"⚠️ No affiliate link found to update: {platform} for {influencer_id}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error updating affiliate link: {e}")
-            return False
-
-    def delete_affiliate_link(self, influencer_id: str, platform: str) -> bool:
-        """FIXED: Delete an affiliate link"""
-        try:
-            response = self.supabase.table('affiliate_links') \
-                .delete() \
-                .eq('influencer_id', influencer_id) \
-                .eq('platform', platform) \
-                .execute()
-            
-            if response.data and len(response.data) > 0:
-                logger.info(f"✅ Affiliate link deleted: {platform} for {influencer_id}")
-                return True
-            else:
-                logger.warning(f"⚠️ No affiliate link found to delete: {platform} for {influencer_id}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error deleting affiliate link: {e}")
-            return False
 
     def store_chat_interaction(self, interaction_data: Dict) -> bool:
         """FIXED: Store chat interaction for analytics with proper validation"""
