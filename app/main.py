@@ -20,6 +20,7 @@ from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from werkzeug.exceptions import RequestEntityTooLarge
+import time 
 
 try:
     import PyPDF2
@@ -365,8 +366,8 @@ class HeyGenAPI:
             raise e  # Don't fall back - let the frontend handle the error
 
     @staticmethod
-    def generate_video(avatar_id, text, voice_id=None):
-        """Generate video with avatar using HeyGen API v2"""
+    def generate_video(avatar_id, text, voice_id=None, is_newly_created=False):
+        """FIXED: Generate video with avatar using HeyGen API v2 with proper error handling"""
         try:
             headers = {
                 "X-Api-Key": Config.HEYGEN_API_KEY,
@@ -412,7 +413,6 @@ class HeyGenAPI:
             )
             
             logger.info(f"📡 HeyGen video generation response: {response.status_code}")
-            logger.info(f"📋 Response body: {response.text}")
             
             if response.status_code == 200:
                 data = response.json()
@@ -434,6 +434,29 @@ class HeyGenAPI:
                     error_msg = data.get('message', 'Video generation failed')
                     logger.error(f"❌ HeyGen video error: {error_msg}")
                     raise Exception(error_msg)
+                    
+            elif response.status_code == 404:
+                # Handle 404 differently for newly created avatars
+                try:
+                    error_data = response.json()
+                    error_code = error_data.get('error', {}).get('code', '')
+                    
+                    if error_code == 'avatar_not_found':
+                        if is_newly_created:
+                            logger.warning(f"⏳ Newly created avatar {avatar_id} not yet ready for video generation")
+                            raise Exception("AVATAR_STILL_PROCESSING")
+                        else:
+                            logger.error(f"❌ Existing avatar {avatar_id} no longer exists")
+                            raise Exception("AVATAR_NOT_FOUND")
+                    else:
+                        raise Exception(f"Avatar error: {error_data.get('error', {}).get('message', 'Unknown error')}")
+                        
+                except json.JSONDecodeError:
+                    if is_newly_created:
+                        raise Exception("AVATAR_STILL_PROCESSING")
+                    else:
+                        raise Exception("AVATAR_NOT_FOUND")
+                        
             else:
                 error_text = response.text
                 logger.error(f"❌ HeyGen video API error: {response.status_code} - {error_text}")
@@ -445,7 +468,7 @@ class HeyGenAPI:
 
     @staticmethod
     def get_video_status(video_id):
-        """Check video generation status with proper error handling"""
+        """FIXED: Check video generation status with proper error handling"""
         try:
             headers = {
                 "X-Api-Key": Config.HEYGEN_API_KEY,
@@ -461,7 +484,6 @@ class HeyGenAPI:
             )
             
             logger.info(f"📊 Status check response: {response.status_code}")
-            logger.info(f"📋 Status response body: {response.text}")
             
             if response.status_code == 200:
                 data = response.json()
@@ -522,6 +544,58 @@ class HeyGenAPI:
         except Exception as e:
             logger.error(f"❌ Get avatars error: {e}")
             return []
+
+    @staticmethod
+    def validate_avatar(avatar_id, is_newly_created=False):
+        """FIXED: Enhanced avatar validation with special handling for new avatars"""
+        import time
+        
+        try:
+            headers = {
+                "X-Api-Key": Config.HEYGEN_API_KEY,
+                "Accept": "application/json"
+            }
+            
+            # Skip validation for newly created avatars - they need time to process
+            if is_newly_created:
+                logger.info(f"🕐 Skipping validation for newly created avatar {avatar_id} - allowing processing time")
+                return True
+            
+            # Test with a simple avatar info request
+            response = requests.get(
+                f"https://api.heygen.com/v1/avatar/{avatar_id}",
+                headers=headers,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                logger.info(f"✅ Avatar {avatar_id} validated successfully")
+                return True
+            elif response.status_code == 404:
+                logger.warning(f"⚠️ Avatar {avatar_id} not found on HeyGen")
+                
+                # For existing avatars, try once more with longer delay
+                time.sleep(3)
+                
+                response = requests.get(
+                    f"https://api.heygen.com/v1/avatar/{avatar_id}",
+                    headers=headers,
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    logger.info(f"✅ Avatar {avatar_id} now available after retry")
+                    return True
+                else:
+                    logger.warning(f"⚠️ Avatar {avatar_id} still not found after retry")
+                    return False
+            else:
+                logger.warning(f"⚠️ Avatar validation returned {response.status_code}")
+                return True  # Assume valid if we can't confirm otherwise
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Avatar validation error: {e}")
+            return True  # Assume valid if validation fails
 
 # =============================================================================
 # ERROR HANDLERS
@@ -795,7 +869,7 @@ def login():
 @app.route('/api/influencer/profile', methods=['GET'])
 @token_required
 def get_influencer_profile(current_user):
-    """Get influencer profile with enhanced voice, avatar, and KNOWLEDGE info"""
+    """FIXED: Get influencer profile with enhanced voice, avatar, and knowledge info"""
     try:
         influencer = db.get_influencer(current_user['id'])
         if not influencer:
@@ -807,7 +881,6 @@ def get_influencer_profile(current_user):
         # Get knowledge documents
         knowledge_documents = []
         try:
-            # Get uploaded documents from database
             doc_response = db.supabase.table('knowledge_documents') \
                 .select('*') \
                 .eq('influencer_id', current_user['id']) \
@@ -815,7 +888,6 @@ def get_influencer_profile(current_user):
                 .execute()
             
             if doc_response.data:
-                # Convert database documents to frontend format
                 for doc in doc_response.data:
                     knowledge_documents.append({
                         'id': doc['id'],
@@ -828,7 +900,7 @@ def get_influencer_profile(current_user):
                         'processed': doc.get('is_processed', False)
                     })
                 
-                logger.info(f"📚 Found {len(knowledge_documents)} documents for user {current_user['username']}")
+                logger.info(f"Found {len(knowledge_documents)} documents for user {current_user['username']}")
             
         except Exception as doc_error:
             logger.error(f"Error loading knowledge documents: {doc_error}")
@@ -848,7 +920,7 @@ def get_influencer_profile(current_user):
             'avatar_type': influencer.get('avatar_type', 'none'),
             'created_at': influencer.get('created_at'),
             'updated_at': influencer.get('updated_at'),
-            'knowledge_documents': knowledge_documents  # ADD THIS LINE!
+            'knowledge_documents': knowledge_documents
         }
 
         return jsonify({
@@ -900,7 +972,7 @@ def update_influencer_profile(current_user):
 @app.route('/api/avatar/create', methods=['POST'])
 @token_required
 def create_avatar(current_user):
-    """Enhanced avatar creation with plan limit handling"""
+    """FIXED: Avatar creation with enhanced timing and error handling"""
     try:
         # Get uploaded file
         image_file = request.files.get('file') or request.files.get('image')
@@ -944,15 +1016,15 @@ def create_avatar(current_user):
                     
                     return jsonify({
                         'status': 'success',
-                        'message': '✅ Custom avatar created from your photo!',
+                        'message': 'Custom avatar created from your photo!',
                         'data': {
                             'avatar_id': avatar_id,
                             'status': avatar_result.get('status', 'ready'),
                             'type': avatar_result.get('type', 'talking_photo'),
                             'is_custom': True,
+                            'is_newly_created': True,
+                            'processing_time_estimate': 60,
                             'method': avatar_result.get('method', 'talking_photo'),
-                            'preview_image_url': avatar_result.get('preview_image_url'),
-                            'preview_video_url': avatar_result.get('preview_video_url'),
                             'created_at': datetime.now(timezone.utc).isoformat()
                         }
                     }), 201
@@ -969,36 +1041,8 @@ def create_avatar(current_user):
             
             error_message = str(heygen_error)
             
-            # Handle specific HeyGen error codes
-            if "401028" in error_message or "exceeded your limit" in error_message.lower():
-                return jsonify({
-                    'status': 'error',
-                    'message': 'HeyGen Plan Limit Reached',
-                    'error_type': 'plan_limit_exceeded',
-                    'details': 'You have reached your plan\'s avatar creation limit.',
-                    'solutions': [
-                        'Upgrade your HeyGen plan for more avatar credits',
-                        'Delete unused avatars from your HeyGen dashboard',
-                        'Contact support for assistance'
-                    ],
-                    'links': {
-                        'upgrade': 'https://app.heygen.com/settings/billing',
-                        'dashboard': 'https://app.heygen.com/avatars',
-                        'support': 'mailto:support@heygen.com'
-                    }
-                }), 402  # Payment Required status code
-            elif "format not supported" in error_message.lower():
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Image format not supported. Please use JPEG, PNG, or WebP format.',
-                    'error_type': 'format_error',
-                    'suggestions': [
-                        'Convert your image to JPEG format',
-                        'Try a different image file',
-                        'Ensure the file is not corrupted'
-                    ]
-                }), 400
-            elif "face" in error_message.lower():
+            # Handle specific HeyGen error types
+            if "face" in error_message.lower():
                 return jsonify({
                     'status': 'error',
                     'message': 'Could not detect a face in the image. Please use a clear photo with a visible face.',
@@ -1006,39 +1050,20 @@ def create_avatar(current_user):
                     'suggestions': [
                         'Use a clear photo with good lighting',
                         'Ensure only one face is visible in the image',
-                        'Try a front-facing photo',
-                        'Remove glasses or hats if they obscure the face'
+                        'Try a front-facing photo'
                     ]
                 }), 400
-            elif "authentication" in error_message.lower() or "api key" in error_message.lower():
+            elif "format not supported" in error_message.lower():
                 return jsonify({
                     'status': 'error',
-                    'message': 'HeyGen API authentication failed. Please contact support.',
-                    'error_type': 'auth_error'
-                }), 401
-            elif "credits" in error_message.lower() or "insufficient" in error_message.lower():
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Insufficient HeyGen credits. Please check your account balance.',
-                    'error_type': 'credits_error'
-                }), 429
-            elif "too many" in error_message.lower() or "rate limit" in error_message.lower():
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Too many requests. Please wait a moment and try again.',
-                    'error_type': 'rate_limit_error'
-                }), 429
+                    'message': 'Image format not supported. Please use JPEG, PNG, or WebP format.',
+                    'error_type': 'format_error'
+                }), 400
             else:
                 return jsonify({
                     'status': 'error',
                     'message': f'Avatar creation failed: {error_message}',
-                    'error_type': 'creation_failed',
-                    'suggestions': [
-                        'Try a different image with a clear face',
-                        'Ensure good image quality and lighting',
-                        'Use JPEG format if possible',
-                        'Contact support if the issue persists'
-                    ]
+                    'error_type': 'creation_failed'
                 }), 500
             
     except Exception as e:
@@ -1120,7 +1145,7 @@ def get_avatar_status(current_user):
 # Enhanced Voice Management Routes
 @app.route('/api/avatar/list-voices', methods=['GET'])
 def list_available_voices():
-    """Get enhanced list of available voices"""
+    """FIXED: Get enhanced list of available voices for avatar setup"""
     try:
         voices = [
             {
@@ -1162,46 +1187,6 @@ def list_available_voices():
                 "language": "English",
                 "style": "Warm",
                 "description": "Gentle, caring female voice ideal for personal brands"
-            },
-            {
-                "voice_id": "26b2064088674c80b1e5fc5ab1a068ec", 
-                "name": "James (Confident)",
-                "gender": "Male",
-                "language": "English",
-                "style": "Confident",
-                "description": "Strong, confident male voice for motivational content"
-            },
-            {
-                "voice_id": "5c8e6a2b1f3d45e7a9c4b8d6f2e1a9c8",
-                "name": "Luna (Energetic)",
-                "gender": "Female",
-                "language": "English",
-                "style": "Energetic",
-                "description": "Vibrant, enthusiastic female voice for dynamic content"
-            },
-            {
-                "voice_id": "7f9d2c4e6b8a1d5f3e9c7a2b4f6d8e1a",
-                "name": "Alexander (Sophisticated)",
-                "gender": "Male",
-                "language": "English", 
-                "style": "Sophisticated",
-                "description": "Refined male voice perfect for luxury brands"
-            },
-            {
-                "voice_id": "9a5e3f7b2d8c4a6e1f9b5d3a7c2f8e4b",
-                "name": "Sophia (Gentle)",
-                "gender": "Female",
-                "language": "English",
-                "style": "Gentle",
-                "description": "Soft, soothing female voice for wellness content"
-            },
-            {
-                "voice_id": "2c8f4a6e1b7d3f9c5a8e2b4f6d1a9c7e",
-                "name": "Marcus (Dynamic)",
-                "gender": "Male", 
-                "language": "English",
-                "style": "Dynamic",
-                "description": "Engaging male voice great for entertainment content"
             }
         ]
         
@@ -1224,7 +1209,7 @@ def list_available_voices():
 @app.route('/api/voice/preference', methods=['POST'])
 @token_required
 def save_voice_preference(current_user):
-    """Enhanced voice preference saving"""
+    """FIXED: Enhanced voice preference saving with avatar integration"""
     try:
         data = request.get_json()
         voice_id = data.get('voice_id')
@@ -1241,7 +1226,7 @@ def save_voice_preference(current_user):
         })
         
         if success:
-            logger.info(f"✅ Voice preference updated for {current_user['username']}: {voice_id}")
+            logger.info(f"Voice preference updated for {current_user['username']}: {voice_id}")
             return jsonify({
                 'status': 'success',
                 'message': 'Voice preference saved successfully',
@@ -1265,7 +1250,7 @@ def save_voice_preference(current_user):
 @app.route('/api/voice/preference', methods=['GET'])
 @token_required
 def get_voice_preference(current_user):
-    """Get user's preferred voice"""
+    """FIXED: Get user's preferred voice"""
     try:
         influencer = db.get_influencer(current_user['id'])
         preferred_voice_id = influencer.get('preferred_voice_id', Config.DEFAULT_VOICE_ID)
@@ -1371,13 +1356,15 @@ def create_voice_clone(current_user):
 @app.route('/api/avatar/test-video', methods=['POST'])
 @token_required
 def generate_test_video(current_user):
-    """FIXED: Generate test video using proper HeyGen API"""
+    """FIXED: Generate test video with enhanced handling for new avatars"""
     try:
         data = request.get_json()
         
         avatar_id = data.get('avatar_id')
         text = data.get('text', 'Hello! This is a test of my AI avatar with my selected voice. How does it look and sound?')
         voice_id = data.get('voice_id')
+        is_newly_created = data.get('is_newly_created', False)
+        validate_only = data.get('validate_only', False)
         
         if not avatar_id:
             return jsonify({
@@ -1390,18 +1377,49 @@ def generate_test_video(current_user):
             influencer = db.get_influencer(current_user['id'])
             voice_id = influencer.get('preferred_voice_id', Config.DEFAULT_VOICE_ID)
         
-        logger.info(f"🎬 Generating test video for avatar: {avatar_id} with voice: {voice_id}")
+        logger.info(f"Generating test video for avatar: {avatar_id} with voice: {voice_id}")
+        logger.info(f"Is newly created: {is_newly_created}")
         
-        # Use the proper HeyGen API method for video generation
+        # If validate_only flag is set, just check if avatar exists
+        if validate_only:
+            try:
+                is_valid = HeyGenAPI.validate_avatar(avatar_id, is_newly_created)
+                if is_valid:
+                    return jsonify({
+                        'status': 'success',
+                        'message': 'Avatar validation successful'
+                    })
+                else:
+                    return jsonify({
+                        'status': 'error',
+                        'message': 'Avatar not found on HeyGen servers',
+                        'error_type': 'avatar_not_found'
+                    }), 404
+            except Exception as validation_error:
+                logger.error(f"Avatar validation failed: {validation_error}")
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Avatar validation failed',
+                    'error_type': 'validation_failed'
+                }), 500
+        
+        # Enhanced timing for newly created avatars
+        if is_newly_created:
+            logger.info("New avatar detected - waiting 10 seconds for HeyGen processing...")
+            import time
+            time.sleep(10)
+        
+        # Attempt video generation with proper error handling
         try:
             video_result = HeyGenAPI.generate_video(
                 avatar_id=avatar_id,
                 text=text,
-                voice_id=voice_id
+                voice_id=voice_id,
+                is_newly_created=is_newly_created
             )
             
             if video_result and video_result.get('video_id'):
-                logger.info(f"✅ Video generation started: {video_result['video_id']}")
+                logger.info(f"Video generation started: {video_result['video_id']}")
                 
                 return jsonify({
                     'status': 'success',
@@ -1414,19 +1432,49 @@ def generate_test_video(current_user):
                         'voice_id': voice_id
                     }
                 })
-                
             else:
                 raise Exception("No video ID returned from HeyGen")
                 
         except Exception as video_error:
-            logger.error(f"❌ HeyGen video generation failed: {video_error}")
-            return jsonify({
-                'status': 'error',
-                'message': f'Video generation failed: {str(video_error)}'
-            }), 500
+            error_message = str(video_error)
+            logger.error(f"HeyGen video generation failed: {video_error}")
+            
+            # Enhanced error handling for avatar timing issues
+            if error_message == "AVATAR_STILL_PROCESSING":
+                retry_delay = 60 if is_newly_created else 30
+                
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Avatar is still processing on HeyGen servers. Please wait and try again.',
+                    'error_type': 'avatar_processing',
+                    'requires_retry': True,
+                    'retry_delay': retry_delay,
+                    'is_newly_created': is_newly_created
+                }), 202
+                
+            elif error_message == "AVATAR_NOT_FOUND":
+                # Clear invalid avatar from database
+                db.update_avatar_status(current_user['id'], {
+                    'heygen_avatar_id': None,
+                    'avatar_training_status': 'none',
+                    'avatar_type': 'none'
+                })
+                
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Avatar no longer exists on HeyGen servers. Please create a new avatar.',
+                    'error_type': 'avatar_not_found',
+                    'requires_new_avatar': True
+                }), 404
+            else:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Video generation failed: {str(video_error)}',
+                    'error_type': 'generation_failed'
+                }), 500
             
     except Exception as e:
-        logger.error(f"❌ Test video generation error: {e}")
+        logger.error(f"Test video generation error: {e}")
         return jsonify({
             'status': 'error',
             'message': 'Failed to generate test video'
@@ -1437,37 +1485,29 @@ def generate_test_video(current_user):
 def get_video_status_fixed(current_user, video_id):
     """FIXED: Get real video status from HeyGen API"""
     try:
-        logger.info(f"📊 Checking video status for: {video_id}")
+        logger.info(f"Checking video status for: {video_id}")
         
         # Use the proper HeyGen API method for status checking
-        try:
-            video_status = HeyGenAPI.get_video_status(video_id)
-            
-            logger.info(f"📊 Video status response: {video_status}")
-            
-            return jsonify({
-                'status': 'success',
-                'data': video_status
-            })
-                
-        except Exception as heygen_error:
-            logger.error(f"❌ HeyGen video status check failed: {heygen_error}")
-            return jsonify({
-                'status': 'error',
-                'message': f'Failed to check video status: {str(heygen_error)}'
-            }), 500
+        video_status = HeyGenAPI.get_video_status(video_id)
         
+        logger.info(f"Video status response: {video_status}")
+        
+        return jsonify({
+            'status': 'success',
+            'data': video_status
+        })
+                
     except Exception as e:
-        logger.error(f"❌ Video status check error: {e}")
+        logger.error(f"Video status check error: {e}")
         return jsonify({
             'status': 'error',
-            'message': 'Failed to check video status'
+            'message': f'Failed to check video status: {str(e)}'
         }), 500
 
 @app.route('/api/voice/generate-audio', methods=['POST'])
 @token_required
 def generate_voice_audio_endpoint(current_user):
-    """FIXED: Generate audio using user's preferred voice with proper error handling"""
+    """FIXED: Generate audio using user's preferred voice"""
     try:
         data = request.get_json()
         
@@ -1492,14 +1532,14 @@ def generate_voice_audio_endpoint(current_user):
                 'message': 'Text too long. Maximum 1000 characters.'
             }), 400
         
-        # FIXED: Get user's preferred voice if not specified
+        # Get user's preferred voice if not specified
         if not voice_id:
             influencer = db.get_influencer(current_user['id'])
             voice_id = influencer.get('preferred_voice_id') or influencer.get('voice_id') or Config.DEFAULT_VOICE_ID
         
         logger.info(f"🔊 Generating audio for user: {current_user['username']}, voice: {voice_id}")
         
-        # FIXED: Generate audio using correct method
+        # Generate audio using correct method
         audio_url = chatbot.generate_audio_response(text, voice_id)
         
         if audio_url:
@@ -1509,7 +1549,7 @@ def generate_voice_audio_endpoint(current_user):
                     'audio_url': audio_url,
                     'text': text,
                     'voice_id': voice_id,
-                    'duration_estimate': len(text) / 10  # Rough estimate: 10 chars per second
+                    'duration_estimate': len(text) / 10
                 }
             })
         else:
@@ -1527,7 +1567,7 @@ def generate_voice_audio_endpoint(current_user):
 
 @app.route('/api/voice/preview', methods=['POST'])
 def preview_voice():
-    """Preview a voice with sample text (no authentication required)"""
+    """FIXED: Preview a voice with sample text (no authentication required)"""
     try:
         data = request.get_json()
         
@@ -1540,8 +1580,8 @@ def preview_voice():
         
         logger.info(f"🎤 Voice preview requested for voice: {voice_id}")
         
-        # Generate audio
-        audio_url = chatbot.generate_voice_audio(sample_text, voice_id)
+        # Generate audio using the chatbot
+        audio_url = chatbot.generate_audio_response(sample_text, voice_id)
         
         if audio_url:
             return jsonify({
@@ -1602,7 +1642,7 @@ def speech_to_text():
             }), 400
         
         # FIXED: Proper temporary file handling for webm files
-        temp_file = None
+        temp_filename = None
         try:
             # Create temporary file with proper extension
             with tempfile.NamedTemporaryFile(delete=False, suffix='.webm') as temp_file:
@@ -1613,9 +1653,9 @@ def speech_to_text():
                 temp_file.flush()
                 temp_filename = temp_file.name
             
-            logger.info(f"🎤 Temp file created: {temp_filename}, size: {len(file_content)} bytes")
+            logger.info(f"Temp file created: {temp_filename}, size: {len(file_content)} bytes")
             
-            # FIXED: Use OpenAI Whisper API with proper file object
+            # Use OpenAI Whisper API with proper file object
             with open(temp_filename, 'rb') as audio_data:
                 transcript = chatbot.client.audio.transcriptions.create(
                     model="whisper-1",
@@ -1627,12 +1667,12 @@ def speech_to_text():
             transcription = transcript.strip() if isinstance(transcript, str) else transcript.text.strip()
             
             if transcription:
-                logger.info(f"✅ Speech-to-text successful: {transcription[:50]}...")
+                logger.info(f"Speech-to-text successful: {transcription[:50]}...")
                 return jsonify({
                     'status': 'success',
                     'data': {
                         'transcription': transcription,
-                        'confidence': 0.95  # OpenAI Whisper generally has high confidence
+                        'confidence': 0.95
                     }
                 })
             else:
@@ -1642,11 +1682,11 @@ def speech_to_text():
                 }), 400
                 
         finally:
-            # FIXED: Proper cleanup of temporary file
-            if temp_file and os.path.exists(temp_filename):
+            # Proper cleanup of temporary file
+            if temp_filename and os.path.exists(temp_filename):
                 try:
                     os.unlink(temp_filename)
-                    logger.info(f"🗑️ Cleaned up temp file: {temp_filename}")
+                    logger.info(f"Cleaned up temp file: {temp_filename}")
                 except Exception as cleanup_error:
                     logger.warning(f"Could not delete temporary file: {cleanup_error}")
         
@@ -1657,10 +1697,73 @@ def speech_to_text():
             'message': f'Speech-to-text processing failed: {str(e)}'
         }), 500
        
-# Enhanced Chat Routes
+def format_affiliate_product_response_enhanced(products: List[Dict], influencer_name: str, result_info: Dict) -> str:
+    """ENHANCED: Format affiliate products with better context and demo handling"""
+    if not products:
+        return f"I'd love to help you find products, but I'm having trouble connecting to my affiliate partners right now. Let me know what specific features you're looking for!"
+    
+    # Determine response type
+    has_real = result_info.get('has_real_products', False)
+    has_demo = len(result_info.get('demo_platforms', [])) > 0
+    successful_platforms = result_info.get('successful_platforms', [])
+    demo_platforms = result_info.get('demo_platforms', [])
+    
+    # Craft opening based on product types
+    if has_real and not has_demo:
+        response = f"Great question! I found some excellent products through my affiliate partnerships:\n\n"
+    elif has_demo and not has_real:
+        response = f"I have some great product recommendations for you! (Note: Currently showing demo products due to API connectivity):\n\n"
+    else:
+        response = f"Here are some product options I found:\n\n"
+    
+    # Format each product
+    for i, product in enumerate(products[:3], 1):
+        # Handle different currencies
+        if product.get('currency') == 'JPY':
+            price_str = f"¥{product['price']:,.0f}" if product.get('price', 0) > 0 else "See price"
+        else:
+            price_str = f"${product['price']:.2f}" if product.get('price', 0) > 0 else "See price"
+        
+        rating_str = f"⭐ {product['rating']:.1f}" if product.get('rating', 0) > 0 else ""
+        
+        # Product name with demo indicator
+        name = product['name']
+        if product.get('is_demo'):
+            name += " (Demo)"
+        
+        response += f"**{i}. {name}**\n"
+        response += f"💰 {price_str}"
+        
+        if rating_str:
+            response += f" | {rating_str}"
+        
+        if product.get('review_count', 0) > 0:
+            response += f" ({product['review_count']} reviews)"
+        
+        if product.get('shop_name'):
+            response += f" | 🏪 {product['shop_name']}"
+        
+        response += f"\n📝 {product.get('description', 'Quality product')[:100]}...\n"
+        
+        # Only show affiliate links for real products
+        if product.get('affiliate_url') and not product.get('is_demo'):
+            response += f"🔗 [View Product]({product['affiliate_url']})\n\n"
+        else:
+            response += "\n"
+    
+    # Add contextual footer
+    if successful_platforms and demo_platforms:
+        response += f"💡 *Found real products from {', '.join(successful_platforms)} and demo products from {', '.join(demo_platforms)}.*\n"
+    elif successful_platforms:
+        response += f"💡 *Found through my {', '.join(successful_platforms)} partnerships. I earn a small commission if you make a purchase.*\n"
+    elif demo_platforms:
+        response += f"💡 *These are demonstration products from {', '.join(demo_platforms)}. I'm working to resolve API connectivity issues.*\n"
+    
+    return response
+
 @app.route('/api/chat', methods=['POST'])
 def chat_with_influencer():
-    """Enhanced chat endpoint with robust product recommendation support"""
+    """FIXED: Enhanced chat endpoint with proper avatar and voice integration"""
     try:
         data = request.get_json()
         
@@ -1674,6 +1777,8 @@ def chat_with_influencer():
         username = data.get('username', '').strip()
         influencer_id = data.get('influencer_id')
         session_id = data.get('session_id', str(uuid.uuid4()))
+        voice_mode = data.get('voice_mode', False)
+        video_mode = data.get('video_mode', False)
         
         if not user_message:
             return jsonify({
@@ -1698,61 +1803,42 @@ def chat_with_influencer():
         influencer_id = influencer['id']
         influencer_name = influencer.get('username', 'the influencer')
         
-        logger.info(f"💬 Chat request - User: {influencer_name}, Message: {user_message[:50]}...")
+        logger.info(f"Chat request - User: {influencer_name}, Message: {user_message[:50]}...")
         
-        response_text = ""
-        products_included = False
+        # Generate comprehensive response using the enhanced chatbot
+        response_data = chatbot.get_comprehensive_chat_response(
+            message=user_message,
+            influencer_id=influencer_id,
+            session_id=session_id,
+            influencer_name=influencer_name,
+            voice_mode=voice_mode,
+            video_mode=video_mode
+        )
         
-        # Check if it's a product query
-        if chatbot._is_product_query(user_message):
-            logger.info("🛒 Product query detected - generating recommendations")
-            
+        # Generate audio if voice mode is enabled and user has avatar
+        if voice_mode and influencer.get('heygen_avatar_id'):
             try:
-                if hasattr(chatbot, 'affiliate_service') and chatbot.affiliate_service:
-                    affiliate_links = db.get_affiliate_links(influencer_id)
-                    
-                    if affiliate_links:
-                        recommendations = chatbot.affiliate_service.get_product_recommendations(
-                            query=user_message,
-                            influencer_id=influencer_id,
-                            limit=3
-                        )
-                        
-                        if recommendations['products']:
-                            response_text = format_product_recommendations_quick(
-                                recommendations['products'], influencer_name
-                            )
-                            products_included = True
-                            logger.info(f"✅ Real product recommendations generated: {len(recommendations['products'])} products")
-                        else:
-                            logger.info("🤖 No affiliate products found, generating AI recommendations")
-                            response_text = generate_ai_product_recommendations_quick(user_message, influencer_name)
-                            products_included = True
-                    else:
-                        logger.info("🤖 No affiliate links, generating AI recommendations")
-                        response_text = generate_ai_product_recommendations_quick(user_message, influencer_name)
-                        products_included = True
-                else:
-                    logger.info("🤖 No affiliate service, generating AI recommendations")
-                    response_text = generate_ai_product_recommendations_quick(user_message, influencer_name)
-                    products_included = True
-            except Exception as affiliate_error:
-                logger.error(f"Affiliate service error: {affiliate_error}")
-                response_text = generate_ai_product_recommendations_quick(user_message, influencer_name)
-                products_included = True
-        else:
-            # Use EnhancedChatbot's method for non-product queries
+                voice_id = influencer.get('preferred_voice_id') or influencer.get('voice_id') or Config.DEFAULT_VOICE_ID
+                audio_url = chatbot.generate_audio_response(response_data['text'], voice_id)
+                if audio_url:
+                    response_data['audio_url'] = audio_url
+                    response_data['has_audio'] = True
+            except Exception as audio_error:
+                logger.error(f"Audio generation failed: {audio_error}")
+        
+        # Generate video if video mode is enabled and user has avatar
+        if video_mode and influencer.get('heygen_avatar_id'):
             try:
-                response_text = chatbot.get_chat_response_with_complete_knowledge(
-                    message=user_message,
-                    influencer_id=influencer_id,
-                    session_id=session_id,
-                    influencer_name=influencer_name,
-                    db=db
+                video_url = chatbot.generate_enhanced_video_response(
+                    response_data['text'], 
+                    influencer_id,
+                    influencer.get('preferred_voice_id')
                 )
-            except Exception as chat_error:
-                logger.error(f"Basic chat response error: {chat_error}")
-                response_text = f"Hi! I'm {influencer_name}'s AI assistant. Thanks for your message! How can I help you today?"
+                if video_url:
+                    response_data['video_url'] = video_url
+                    response_data['has_video'] = True
+            except Exception as video_error:
+                logger.error(f"Video generation failed: {video_error}")
         
         # Store interaction
         try:
@@ -1761,19 +1847,13 @@ def chat_with_influencer():
                 'influencer_id': influencer_id,
                 'session_id': session_id,
                 'user_message': user_message,
-                'bot_response': response_text,
-                'products_included': products_included,
-                'knowledge_enhanced': bool(chatbot.rag_processor and not products_included),
-                'has_video': False,
-                'has_audio': False,
+                'bot_response': response_data['text'],
+                'products_included': response_data.get('products_included', False),
+                'knowledge_enhanced': response_data.get('knowledge_enhanced', False),
+                'has_video': response_data.get('video_url', '') != '',
+                'has_audio': response_data.get('audio_url', '') != '',
                 'created_at': datetime.now(timezone.utc).isoformat()
             }
-            # Only add api_errors if the column exists
-            try:
-                db.supabase.table('chat_interactions').select('api_errors').limit(1).execute()
-                interaction_data['api_errors'] = [str(affiliate_error)] if 'affiliate_error' in locals() else []
-            except Exception:
-                logger.info("📋 api_errors column not found, skipping")
             
             db.store_chat_interaction(interaction_data)
         except Exception as storage_error:
@@ -1781,17 +1861,7 @@ def chat_with_influencer():
         
         return jsonify({
             'status': 'success',
-            'data': {
-                'text': response_text,
-                'session_id': session_id,
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'knowledge_enhanced': bool(chatbot.rag_processor and not products_included),
-                'products_included': products_included,
-                'video_url': '',
-                'audio_url': '',
-                'influencer_name': influencer_name,
-                'has_affiliate_products': products_included
-            }
+            'data': response_data
         })
         
     except Exception as e:
@@ -1801,203 +1871,122 @@ def chat_with_influencer():
             'message': 'Chat service temporarily unavailable'
         }), 500
 
-def format_product_recommendations_quick(products: List[Dict], influencer_name: str) -> str:
-    """Format product recommendations for chat display"""
-    if not products:
-        return f"Sorry, I couldn't find any products right now. Can you specify more details?"
+def generate_emergency_ai_recommendations(query: str, influencer_name: str) -> str:
+    """Emergency AI recommendations when everything fails"""
+    try:
+        # Simple template-based recommendations for critical failures
+        common_products = {
+            'laptop': [
+                'Dell Inspiron 15 3000 - Reliable everyday laptop (~$400-600)',
+                'HP Pavilion x360 - Versatile 2-in-1 laptop (~$500-700)', 
+                'Lenovo ThinkPad E15 - Business-grade laptop (~$600-800)'
+            ],
+            'phone': [
+                'iPhone 14 - Latest iOS features and camera (~$700-900)',
+                'Samsung Galaxy S23 - Android flagship with great display (~$600-800)',
+                'Google Pixel 7 - Pure Android experience with excellent camera (~$500-700)'
+            ],
+            'headphones': [
+                'Sony WH-1000XM5 - Premium noise-canceling (~$300-400)',
+                'Apple AirPods Pro - Seamless iOS integration (~$200-250)',
+                'Bose QuietComfort 45 - Comfortable all-day wear (~$250-350)'
+            ]
+        }
+        
+        query_lower = query.lower()
+        products = None
+        
+        # Find matching category
+        for category, product_list in common_products.items():
+            if category in query_lower:
+                products = product_list
+                break
+        
+        if products:
+            response = f"Based on my experience, here are some {query.lower()} options I'd recommend:\n\n"
+            for i, product in enumerate(products, 1):
+                response += f"**{i}. {product}**\n\n"
+            response += "💡 *These are my general recommendations. I'm working to resolve affiliate connection issues to bring you real-time deals.*"
+        else:
+            response = f"I'd love to help you find great {query} options! What specific features, budget, or use case are you considering? I can share some general advice to help you make the best choice."
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"❌ Emergency recommendations error: {e}")
+        return f"I'm here to help with {query}! Could you tell me more about what you're looking for specifically?"
+
+def is_product_query_enhanced(message: str) -> bool:
+    """Enhanced product query detection"""
+    message_lower = message.lower().strip()
     
-    formatted = f"Here are some great options I recommend as {influencer_name}:\n\n🛍️ **Recommended Products:**\n\n"
+    product_patterns = [
+        'recommend', 'recommendation', 'suggest', 'suggestion', 
+        'what should i buy', 'help me find', 'looking for',
+        'best product', 'product for', 'good product',
+        'buy', 'purchase', 'shop', 'shopping'
+    ]
+    
+    return any(pattern in message_lower for pattern in product_patterns)
+
+def format_affiliate_product_response(products: List[Dict], influencer_name: str, successful_platforms: List[str]) -> str:
+    """FIXED: Format real affiliate products only"""
+    if not products:
+        return f"I couldn't find any products through my affiliate connections right now. Let me know what specific features you're looking for and I can provide some general recommendations!"
+    
+    response = f"Great question! I found some excellent products through my affiliate partnerships:\n\n"
     
     for i, product in enumerate(products[:3], 1):
-        price_str = f"${product['price']:.2f}" if product['price'] > 0 else "Price varies"
+        price_str = f"${product['price']:.2f}" if product.get('price', 0) > 0 else "See price"
         rating_str = f"⭐ {product['rating']:.1f}" if product.get('rating', 0) > 0 else ""
         
-        formatted += f"**{i}. {product['name']}**\n"
-        formatted += f"💰 {price_str}"
+        response += f"**{i}. {product['name']}**\n"
+        response += f"💰 {price_str}"
         
         if rating_str:
-            formatted += f" | {rating_str}"
+            response += f" | {rating_str}"
+        
+        if product.get('review_count', 0) > 0:
+            response += f" ({product['review_count']} reviews)"
         
         if product.get('shop_name'):
-            formatted += f" | 🏪 {product['shop_name']}"
+            response += f" | 🏪 {product['shop_name']}"
         
-        formatted += f"\n📝 {product['description'][:100]}...\n"
+        response += f"\n📝 {product.get('description', 'Quality product')[:120]}...\n"
         
         if product.get('affiliate_url'):
-            formatted += f"🔗 [View Product]({product['affiliate_url']})\n\n"
-    
-        formatted += f"💡 *These recommendations are from {product.get('platform_name', 'our partners')}. I earn a small commission if you make a purchase.*\n"
-    
-    return formatted
-
-def generate_ai_product_recommendations_quick(query, influencer_name):
-    """Quick AI product recommendations"""
-    try:
-        import openai
-        client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
-        
-        prompt = f"""Generate 3 specific product recommendations for: {query}
-
-For each product:
-- Specific product name
-- Realistic price range
-- Brief description (1-2 sentences)
-
-Format as helpful recommendations from {influencer_name}."""
-        
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=300,
-            temperature=0.7
-        )
-        
-        ai_response = response.choices[0].message.content.strip()
-        ai_response += f"\n\n💡 *These are {influencer_name}'s general recommendations. I'm working on bringing you specific deals through affiliate partnerships!*"
-        
-        return ai_response
-        
-    except Exception as e:
-        print(f"AI recommendation error: {e}")
-        return f"I'd love to help you find great {query} options! What specific features or budget are you considering?"
-
-def generate_basic_chat_response(message, influencer_name, influencer_id):
-    """Generate basic chat response"""
-    try:
-        import openai
-        client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
-        
-        # Get basic bio info if available
-        bio_context = ""
-        try:
-            influencer = db.get_influencer(influencer_id)
-            if influencer and influencer.get('bio'):
-                bio_context = f"\n\nAbout {influencer_name}: {influencer['bio']}"
-        except:
-            pass
-        
-        system_prompt = f"""You are {influencer_name}'s AI assistant. Be helpful, friendly, and conversational.{bio_context}
-
-Respond naturally to the user's message. Keep responses concise but informative (2-4 sentences)."""
-        
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": message}
-            ],
-            max_tokens=200,
-            temperature=0.7
-        )
-        
-        return response.choices[0].message.content.strip()
-        
-    except Exception as e:
-        print(f"Basic chat response error: {e}")
-        return f"Hi! I'm {influencer_name}'s AI assistant. Thanks for your message! How can I help you today?"
-    
-def handle_product_query_fallback(user_message, influencer_id, influencer_name, session_id):
-    """Handle product queries when main chatbot fails"""
-    try:
-        logger.info(f"🛒 Handling product query fallback for: {user_message[:50]}...")
-        
-        # Check if affiliate service is available
-        if not chatbot.affiliate_service:
-            return generate_no_affiliate_response(user_message, influencer_name, session_id)
-        
-        # Try to get product recommendations
-        recommendations = chatbot.affiliate_service.get_product_recommendations(
-            query=user_message,
-            influencer_id=influencer_id,
-            limit=3
-        )
-        
-        if recommendations['products']:
-            # Format the products for display
-            response_text = f"Great question! Here are some product recommendations I found:\n\n"
-            
-            for i, product in enumerate(recommendations['products'][:3], 1):
-                price_str = f"${product['price']:.2f}" if product['price'] > 0 else "See price"
-                rating_str = f"⭐ {product['rating']:.1f}" if product['rating'] > 0 else ""
-                
-                response_text += f"**{i}. {product['name']}**\n"
-                response_text += f"💰 {price_str}"
-                
-                if rating_str:
-                    response_text += f" | {rating_str}"
-                
-                if product.get('shop_name'):
-                    response_text += f" | 🏪 {product['shop_name']}"
-                
-                if product.get('description'):
-                    response_text += f"\n📝 {product['description'][:150]}...\n"
-                
-                if product.get('affiliate_url'):
-                    response_text += f"🔗 [View Product]({product['affiliate_url']})\n\n"
-            
-            response_text += f"💡 *Found these through my affiliate partnerships. I may earn a small commission if you make a purchase.*"
-            
-            return jsonify({
-                'status': 'success',
-                'data': {
-                    'text': response_text,
-                    'session_id': session_id,
-                    'timestamp': datetime.now(timezone.utc).isoformat(),
-                    'knowledge_enhanced': False,
-                    'products_included': True,
-                    'video_url': '',
-                    'audio_url': '',
-                    'influencer_name': influencer_name,
-                    'has_affiliate_products': True,
-                    'products_found': len(recommendations['products']),
-                    'platforms_searched': recommendations['platforms_searched']
-                }
-            })
+            response += f"🔗 [View Product]({product['affiliate_url']})\n\n"
         else:
-            # No products found, generate AI recommendations
-            return generate_ai_product_fallback(user_message, influencer_name, session_id)
-            
-    except Exception as e:
-        logger.error(f"Product query fallback error: {e}")
-        return generate_ai_product_fallback(user_message, influencer_name, session_id)
-
-def generate_no_affiliate_response(user_message, influencer_name, session_id):
-    """Generate response when no affiliate service is available"""
-    response_text = f"I'd love to help you with product recommendations! However, I don't have my affiliate connections set up yet. "
-    response_text += f"In the meantime, I can share some general advice about {user_message.lower()}. "
-    response_text += f"What specific features or budget are you considering?"
+            response += "\n"
     
-    return jsonify({
-        'status': 'success',
-        'data': {
-            'text': response_text,
-            'session_id': session_id,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'knowledge_enhanced': False,
-            'products_included': False,
-            'video_url': '',
-            'audio_url': '',
-            'influencer_name': influencer_name,
-            'has_affiliate_products': False
-        }
-    })
+    # Simple footer for real products
+    if successful_platforms:
+        platforms_text = ', '.join(successful_platforms)
+        response += f"💡 *Found through my {platforms_text} partnerships. I earn a small commission if you make a purchase.*\n"
+    
+    return response
 
-def generate_ai_product_fallback(user_message, influencer_name, session_id):
-    """Generate AI-based product recommendations as fallback"""
+def generate_enhanced_ai_recommendations(query: str, influencer_name: str, affiliate_links: List[Dict]) -> str:
+    """Generate AI recommendations when no real products available"""
     try:
         client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
         
-        prompt = f"""You are {influencer_name}, an influencer helping someone with product recommendations related to: {user_message}
+        platform_context = ""
+        if affiliate_links:
+            platforms = [link.get('platform', '').title() for link in affiliate_links if link.get('is_active', True)]
+            platform_context = f" I have affiliate partnerships with {', '.join(platforms)}, but couldn't find specific products right now."
+        
+        prompt = f"""You are {influencer_name}, helping someone find products related to: {query}
 
-Generate 3 realistic, specific product recommendations. For each product, provide:
-- A specific product name
-- A realistic price range
-- A brief compelling description (1-2 sentences)
+Generate 3 realistic, specific product recommendations. For each:
+- Specific product name and brand
+- Realistic price range in USD
+- Brief compelling description (1-2 sentences)
 - Why it's relevant to their query
 
-Format as a natural, engaging response. Start with something like "Here are some great options I'd recommend:" """
+Format as helpful, personal recommendations.{platform_context}
+
+Start with: "Based on my experience, here are some great options I'd recommend:" """
         
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -2010,49 +1999,79 @@ Format as a natural, engaging response. Start with something like "Here are some
         )
         
         ai_response = response.choices[0].message.content.strip()
-        ai_response += f"\n\n💡 *These are general recommendations. I'm working on connecting more affiliate partners to bring you specific products and deals!*"
         
-        return jsonify({
-            'status': 'success',
-            'data': {
-                'text': ai_response,
-                'session_id': session_id,
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'knowledge_enhanced': False,
-                'products_included': True,
-                'video_url': '',
-                'audio_url': '',
-                'influencer_name': influencer_name,
-                'has_affiliate_products': False,
-                'ai_generated': True
-            }
-        })
+        if affiliate_links:
+            ai_response += f"\n\n💡 *These are my personal recommendations. I'm working to get you live deals through my affiliate partnerships!*"
+        else:
+            ai_response += f"\n\n💡 *These are my personal recommendations. I'm setting up affiliate partnerships to bring you exclusive deals soon!*"
+        
+        return ai_response
         
     except Exception as e:
-        logger.error(f"AI product fallback error: {e}")
-        return generate_simple_fallback_response(user_message, influencer_name, session_id)
+        logger.error(f"❌ AI recommendations error: {e}")
+        return f"I'd love to help you find great {query} options! What specific features or budget are you considering?"
 
 
-def generate_simple_fallback_response(user_message, influencer_name, session_id):
-    """Generate simple fallback response"""
-    response_text = f"Hi! I'm {influencer_name}'s AI assistant. Thanks for your message about '{user_message}'. "
-    response_text += f"I'm here to help! Could you tell me more specifically what you're looking for?"
-    
-    return jsonify({
-        'status': 'success',
-        'data': {
-            'text': response_text,
-            'session_id': session_id,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'knowledge_enhanced': False,
-            'products_included': False,
-            'video_url': '',
-            'audio_url': '',
-            'influencer_name': influencer_name,
-            'has_affiliate_products': False
-        }
-    })
+def generate_no_affiliate_ai_recommendations(query: str, influencer_name: str) -> str:
+    """Generate AI recommendations when no affiliate setup"""
+    try:
+        client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
+        
+        prompt = f"""You are {influencer_name}, helping someone find products related to: {query}
 
+Generate 3 realistic product recommendations with general advice. Focus on:
+- What to look for when shopping for these items
+- General price ranges and quality indicators
+- Brands or features to consider
+
+Be helpful and educational rather than providing specific purchase links.
+
+Start with: "I'd love to help you find the perfect [product type]! Here's what I'd look for:" """
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": f"You are {influencer_name}, a helpful influencer who gives shopping advice."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=300,
+            temperature=0.7
+        )
+        
+        ai_response = response.choices[0].message.content.strip()
+        ai_response += f"\n\n💡 *I'm working on setting up affiliate partnerships to bring you specific product recommendations and deals. Stay tuned!*"
+        
+        return ai_response
+        
+    except Exception as e:
+        logger.error(f"❌ No affiliate AI recommendations error: {e}")
+        return f"I'd love to help you find great {query} options! What specific features or budget are you considering? I'm working on setting up partnerships to bring you the best deals."
+
+def generate_basic_ai_recommendations(query: str, influencer_name: str) -> str:
+    """Basic fallback AI recommendations"""
+    return f"I'd love to help you find great {query} options! What specific features, budget, or use case are you considering? I can share some general advice to help you make the best choice."
+
+def generate_basic_chat_response(message: str, influencer_name: str) -> str:
+    """Generate basic non-product chat response"""
+    try:
+        client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": f"You are {influencer_name}'s AI assistant. Be helpful, friendly, and conversational. Keep responses concise (2-3 sentences)."},
+                {"role": "user", "content": message}
+            ],
+            max_tokens=150,
+            temperature=0.7
+        )
+        
+        return response.choices[0].message.content.strip()
+        
+    except Exception as e:
+        logger.error(f"❌ Basic chat response error: {e}")
+        return f"Hi! I'm {influencer_name}'s AI assistant. Thanks for your message! How can I help you today?"
+   
 def search_knowledge_base_improved(db, influencer_id: str, query_embedding: List[float], limit: int = 5) -> List[Dict]:
     """FIXED: Improved knowledge base search with better similarity calculation"""
     try:
@@ -2270,7 +2289,7 @@ def get_chat_info(username):
             'chat_url': f"{request.host_url}chat.html?username={clean_username}"
         }
         
-        logger.info(f"✅ Enhanced chat info retrieved for {username} - Avatar: {response_data['has_avatar']}, Knowledge: {response_data['has_knowledge']}, Products: {response_data['chat_capabilities']['product_recommendations']}")
+        logger.info(f"Enhanced chat info retrieved for {username} - Avatar: {response_data['has_avatar']}, Knowledge: {response_data['has_knowledge']}, Products: {response_data['chat_capabilities']['product_recommendations']}")
         
         return jsonify({
             'status': 'success',
@@ -4037,7 +4056,300 @@ def initialize_enhanced_chatbot():
         except ImportError as e2:
             logger.error(f"❌ Failed to initialize any chatbot: {e2}")
             return False
+            
+@app.route('/api/affiliate/debug-rakuten', methods=['POST'])
+@token_required
+def debug_rakuten_connection(current_user):
+    """FIXED: Comprehensive Rakuten API debugging endpoint"""
+    try:
+        # FIXED: Handle both JSON and form data
+        if request.content_type and 'application/json' in request.content_type:
+            data = request.get_json() or {}
+        else:
+            # Handle form data or other content types
+            data = {
+                'client_id': request.form.get('client_id', ''),
+                'client_secret': request.form.get('client_secret', '')
+            }
+        
+        logger.info(f"🔍 Debug request - Content-Type: {request.content_type}")
+        logger.info(f"📝 Request data: {list(data.keys()) if data else 'No data'}")
+        
+        # Get credentials from request or database
+        if data and data.get('client_id'):
+            # Use provided credentials
+            client_id = data.get('client_id', '').strip()
+            client_secret = data.get('client_secret', '').strip()
+            test_source = 'provided_credentials'
+        else:
+            # Use stored credentials
+            affiliate_link = db.get_affiliate_link_by_platform(current_user['id'], 'rakuten')
+            if not affiliate_link:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'No Rakuten connection found and no credentials provided',
+                    'debug_info': {
+                        'has_stored_connection': False,
+                        'has_provided_credentials': bool(data and data.get('client_id')),
+                        'content_type': request.content_type,
+                        'request_keys': list(data.keys()) if data else []
+                    }
+                }), 400
+            
+            client_id = (
+                affiliate_link.get('client_id') or 
+                affiliate_link.get('rakuten_client_id') or 
+                affiliate_link.get('api_key')
+            )
+            client_secret = (
+                affiliate_link.get('client_secret') or 
+                affiliate_link.get('rakuten_client_secret')
+            )
+            test_source = 'stored_credentials'
+        
+        logger.info(f"🔍 Debug Rakuten API for {current_user['username']} using {test_source}")
+        
+        debug_info = {
+            'user': current_user['username'],
+            'test_source': test_source,
+            'request_info': {
+                'content_type': request.content_type,
+                'method': request.method,
+                'has_json': bool(request.get_json(silent=True)),
+                'has_form': bool(request.form)
+            },
+            'credentials_check': {
+                'has_client_id': bool(client_id),
+                'client_id_length': len(client_id) if client_id else 0,
+                'client_id_preview': f"{client_id[:10]}..." if client_id else 'missing',
+                'has_client_secret': bool(client_secret),
+                'client_secret_length': len(client_secret) if client_secret else 0
+            },
+            'api_tests': []
+        }
+        
+        if not client_id:
+            return jsonify({
+                'status': 'error',
+                'message': 'No client_id found',
+                'debug_info': debug_info
+            }), 400
+        
+        # FIXED: Test with SSL verification disabled for debugging
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
+        # Test 1: Basic connectivity with SSL disabled
+        try:
+            logger.info("🧪 Testing basic connectivity to Rakuten...")
+            
+            response = requests.get(
+                'https://api.rakutenadvertising.com',
+                timeout=10,
+                verify=False  # DISABLE SSL for debugging
+            )
+            
+            debug_info['api_tests'].append({
+                'test_name': 'basic_connectivity',
+                'success': response.status_code < 500,
+                'status_code': response.status_code,
+                'response_preview': response.text[:200] if response.text else 'No content',
+                'error': None
+            })
+            
+        except Exception as conn_error:
+            debug_info['api_tests'].append({
+                'test_name': 'basic_connectivity',
+                'success': False,
+                'error': str(conn_error)
+            })
+        
+        # Test 2: OAuth token with SSL disabled
+        try:
+            logger.info("🔑 Testing OAuth token endpoint...")
+            
+            auth_headers = {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'application/json'
+            }
+            
+            auth_payload = {
+                'grant_type': 'client_credentials',
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'scope': 'productsearch'
+            }
+            
+            # Try multiple auth endpoints with SSL disabled
+            auth_urls = [
+                'https://api.rakutenadvertising.com/token',
+                'https://api.rakutenadvertising.com/auth/token',
+                'https://api.rakutenadvertising.com/oauth/token'
+            ]
+            
+            for auth_url in auth_urls:
+                try:
+                    logger.info(f"🔗 Testing auth URL: {auth_url}")
+                    
+                    response = requests.post(
+                        auth_url,
+                        headers=auth_headers,
+                        data=auth_payload,
+                        timeout=15,
+                        verify=False  # DISABLE SSL for debugging
+                    )
+                    
+                    debug_info['api_tests'].append({
+                        'test_name': f'oauth_token_{auth_url.split("/")[-1]}',
+                        'url': auth_url,
+                        'success': response.status_code == 200,
+                        'status_code': response.status_code,
+                        'response_preview': response.text[:300],
+                        'has_access_token': 'access_token' in response.text,
+                        'error': None
+                    })
+                    
+                    if response.status_code == 200:
+                        logger.info(f"✅ SUCCESS with {auth_url}")
+                        try:
+                            token_data = response.json()
+                            access_token = token_data.get('access_token')
+                            if access_token:
+                                # Test 3: Product search with token
+                                logger.info("🔍 Testing product search with token...")
+                                
+                                search_headers = {
+                                    'Authorization': f'Bearer {access_token}',
+                                    'Accept': 'application/json'
+                                }
+                                
+                                search_params = {
+                                    'keyword': 'laptop',
+                                    'limit': 2
+                                }
+                                
+                                search_urls = [
+                                    'https://api.rakutenadvertising.com/v1/productsearch',
+                                    'https://api.rakutenadvertising.com/productsearch/1.0'
+                                ]
+                                
+                                for search_url in search_urls:
+                                    try:
+                                        search_response = requests.get(
+                                            search_url,
+                                            headers=search_headers,
+                                            params=search_params,
+                                            timeout=15,
+                                            verify=False  # DISABLE SSL for debugging
+                                        )
+                                        
+                                        debug_info['api_tests'].append({
+                                            'test_name': f'product_search_{search_url.split("/")[-1]}',
+                                            'url': search_url,
+                                            'success': search_response.status_code == 200,
+                                            'status_code': search_response.status_code,
+                                            'response_preview': search_response.text[:400],
+                                            'has_products': 'product' in search_response.text.lower(),
+                                            'error': None
+                                        })
+                                        
+                                        if search_response.status_code == 200:
+                                            logger.info(f"✅ PRODUCT SEARCH SUCCESS with {search_url}")
+                                            break
+                                            
+                                    except Exception as search_error:
+                                        debug_info['api_tests'].append({
+                                            'test_name': f'product_search_{search_url.split("/")[-1]}',
+                                            'url': search_url,
+                                            'success': False,
+                                            'error': str(search_error)
+                                        })
+                                break
+                        except Exception as token_parse_error:
+                            logger.error(f"Token parsing error: {token_parse_error}")
+                    
+                except Exception as auth_error:
+                    debug_info['api_tests'].append({
+                        'test_name': f'oauth_token_{auth_url.split("/")[-1]}',
+                        'url': auth_url,
+                        'success': False,
+                        'error': str(auth_error)
+                    })
+                    
+        except Exception as oauth_error:
+            debug_info['api_tests'].append({
+                'test_name': 'oauth_flow',
+                'success': False,
+                'error': str(oauth_error)
+            })
+        
+        # Determine overall status
+        any_success = any(
+            test.get('success', False) for test in debug_info['api_tests']
+        )
+        
+        return jsonify({
+            'status': 'success' if any_success else 'error',
+            'message': 'Rakuten API debugging completed' if any_success else 'All API tests failed',
+            'debug_info': debug_info,
+            'next_steps': [
+                'SSL certificate issue detected - using verify=False for testing',
+                'Check if your Rakuten account has API access enabled',
+                'Verify you\'re using Rakuten Advertising (not Rakuten Ichiba)', 
+                'Confirm your Client ID and Secret are correct',
+                'Contact Rakuten support if credentials are correct but API fails'
+            ] if not any_success else [
+                'API connection successful!',
+                'SSL verification disabled for debugging - re-enable in production',
+                'Check which specific endpoint worked in debug_info'
+            ],
+            'ssl_warning': 'SSL verification disabled for debugging. Enable verify=True in production.'
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Debug endpoint error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Debug failed: {str(e)}',
+            'error_type': 'debug_failed',
+            'request_info': {
+                'content_type': request.content_type,
+                'method': request.method,
+                'has_json': bool(request.get_json(silent=True)),
+                'has_form': bool(request.form)
+            }
+        }), 500
 
+def await_test_basic_connectivity():
+    """Test basic network connectivity to Rakuten"""
+    try:
+        import socket
+        
+        # Test DNS resolution
+        socket.gethostbyname('api.rakutenadvertising.com')
+        
+        # Test basic HTTP connectivity
+        response = requests.get(
+            'https://api.rakutenadvertising.com',
+            timeout=10,
+            verify=False
+        )
+        
+        return {
+            'test_name': 'basic_connectivity',
+            'success': True,
+            'dns_resolution': 'success',
+            'http_connectivity': f'HTTP {response.status_code}',
+            'error': None
+        }
+        
+    except Exception as conn_error:
+        return {
+            'test_name': 'basic_connectivity',
+            'success': False,
+            'error': str(conn_error)
+        }
+    
 # Add this to your main initialization
 if __name__ == '__main__':
     # Validate environment

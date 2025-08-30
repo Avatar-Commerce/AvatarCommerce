@@ -129,3 +129,18 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - OpenAI for conversational AI capabilities
 - Supabase for database and storage solutions
 - Apify for product recommendation scraping tools
+
+AVATAR-COMMERCE-BACKEND/
+app├── main.py                 # Main Flask application
+   ├── config.py              # Configuration settings
+   ├── database.py            # Database operations
+   ├── chatbot.py             # Chatbot functionality
+   ├── requirements.txt       # Python dependencies
+   ├── logs/                  # Application logs
+   │   └── avatar_commerce.log
+
+   ├── .env                   # Environment variables (create this)
+├── README.md
+└── venv/                  # Virtual environment (optional)
+
+

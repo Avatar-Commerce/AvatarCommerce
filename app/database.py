@@ -268,9 +268,9 @@ class Database:
             return []
 
     def update_avatar_status(self, influencer_id: str, avatar_data: Dict) -> bool:
-        """Update avatar status using Supabase"""
+        """FIXED: Update avatar status using Supabase with proper error handling"""
         try:
-            # Extract avatar data
+            # Extract avatar data and add timestamp
             update_data = {
                 'updated_at': datetime.now(timezone.utc).isoformat()
             }
@@ -282,7 +282,7 @@ class Database:
             if 'avatar_type' in avatar_data:
                 update_data['avatar_type'] = avatar_data['avatar_type']
             
-            # Update in Supabase
+            # Update in Supabase with proper syntax
             response = self.supabase.table('influencers') \
                 .update(update_data) \
                 .eq('id', influencer_id) \
@@ -577,38 +577,28 @@ class Database:
             logger.error(f"Error searching knowledge base: {e}")
             return []
 
-    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        """FIXED: Get all knowledge documents for an influencer with processing status"""
+    def _cosine_similarity_improved(self, vec1: List[float], vec2: List[float]) -> float:
+        """FIXED: Calculate cosine similarity between two vectors with better error handling"""
         try:
-            response = self.supabase.table('knowledge_documents') \
-                .select('*') \
-                .eq('influencer_id', influencer_id) \
-                .order('created_at', desc=True) \
-                .execute()
+            if len(vec1) != len(vec2):
+                logger.warning(f"Vector length mismatch: {len(vec1)} vs {len(vec2)}")
+                return 0.0
             
-            documents = response.data if response.data else []
+            dot_product = sum(a * b for a, b in zip(vec1, vec2))
+            magnitude1 = math.sqrt(sum(a * a for a in vec1))
+            magnitude2 = math.sqrt(sum(a * a for a in vec2))
             
-            # Enhance each document with processing info
-            for doc in documents:
-                # Check if document has chunks (is searchable)
-                chunk_response = self.supabase.table('knowledge_chunks') \
-                    .select('id') \
-                    .eq('document_id', doc['id']) \
-                    .limit(1) \
-                    .execute()
-                
-                doc['has_chunks'] = bool(chunk_response.data)
-                doc['is_searchable'] = doc.get('is_processed', False) and doc['has_chunks']
+            if magnitude1 == 0 or magnitude2 == 0:
+                return 0.0
             
-            logger.info(f"📚 Retrieved {len(documents)} knowledge documents for influencer {influencer_id}")
-            searchable_count = len([d for d in documents if d.get('is_searchable')])
-            logger.info(f"📚 {searchable_count}/{len(documents)} documents are searchable")
+            similarity = dot_product / (magnitude1 * magnitude2)
             
-            return documents
+            # Ensure result is between -1 and 1
+            return max(-1.0, min(1.0, similarity))
             
         except Exception as e:
-            logger.error(f"Error getting knowledge documents: {e}")
-            return []
+            logger.error(f"Error calculating cosine similarity: {e}")
+            return 0.0
 
     def get_knowledge_for_chat(self, influencer_id: str, query: str, limit: int = 3) -> Dict:
         """Get relevant knowledge for chat responses"""
@@ -1072,28 +1062,6 @@ class Database:
             logger.error(f"Error incrementing conversation counter: {str(e)}")
             return None
 
-    def update_avatar_status(self, influencer_id, avatar_data):
-        """Enhanced avatar status update with better error handling"""
-        try:
-            logger.info(f"💾 Updating avatar status for influencer: {influencer_id}")
-            
-            # Add timestamp
-            avatar_data['updated_at'] = datetime.now(timezone.utc).isoformat()
-            
-            # Update the influencer record
-            result = self.supabase.table('influencers').update(avatar_data).eq('id', influencer_id).execute()
-            
-            if result.data and len(result.data) > 0:
-                logger.info("✅ Avatar status updated successfully")
-                return True
-            else:
-                logger.error("❌ Avatar status update failed - no rows affected")
-                return False
-                
-        except Exception as e:
-            logger.error(f"❌ Database error updating avatar status: {e}")
-            return False
-
     def get_influencer_by_username(self, username):
         """FIXED: Get influencer by username with case-insensitive search"""
         try:
@@ -1303,66 +1271,6 @@ class Database:
             print(f"Error storing chat interaction: {e}")
             return False
 
-    def update_avatar_status(self, influencer_id, avatar_data):
-        """Update influencer's avatar status and information"""
-        try:
-            update_data = {
-                'updated_at': datetime.now(timezone.utc).isoformat(),
-                **avatar_data
-            }
-            
-            response = self.supabase.table('influencers') \
-                .update(update_data) \
-                .eq('id', influencer_id) \
-                .execute()
-            
-            return bool(response.data)
-            
-        except Exception as e:
-            print(f"Error updating avatar status: {e}")
-            return False
-
-    def get_chat_analytics(self, influencer_id, days=30):
-        """Get chat analytics for dashboard"""
-        try:
-            from datetime import timedelta
-            start_date = datetime.now(timezone.utc) - timedelta(days=days)
-            
-            response = self.supabase.table('chat_interactions') \
-                .select('*') \
-                .eq('influencer_id', influencer_id) \
-                .gte('created_at', start_date.isoformat()) \
-                .execute()
-            
-            interactions = response.data if response.data else []
-            
-            # Calculate metrics
-            total_chats = len(interactions)
-            unique_sessions = len(set([chat.get("session_id") for chat in interactions if chat.get("session_id")]))
-            video_responses = len([chat for chat in interactions if chat.get('has_video')])
-            audio_responses = len([chat for chat in interactions if chat.get('has_audio')])
-            product_recommendations = len([chat for chat in interactions if chat.get('products_included')])
-            
-            return {
-                'total_chats': total_chats,
-                'unique_sessions': unique_sessions,
-                'video_responses': video_responses,
-                'audio_responses': audio_responses,
-                'product_recommendations': product_recommendations,
-                'knowledge_enhanced_responses': len([chat for chat in interactions if chat.get('knowledge_enhanced')])
-            }
-            
-        except Exception as e:
-            print(f"Error getting chat analytics: {e}")
-            return {
-                'total_chats': 0,
-                'unique_sessions': 0,
-                'video_responses': 0,
-                'audio_responses': 0,
-                'product_recommendations': 0,
-                'knowledge_enhanced_responses': 0
-            }
-
     def save_knowledge_document(self, document_data: Dict) -> Optional[str]:
         """FIXED: Save knowledge document metadata with proper error handling"""
         try:
@@ -1410,29 +1318,6 @@ class Database:
             logger.error(f"Error getting knowledge documents: {e}")
             return []
 
-    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        """FIXED: Calculate cosine similarity between two vectors with better error handling"""
-        try:
-            if len(vec1) != len(vec2):
-                logger.warning(f"Vector length mismatch: {len(vec1)} vs {len(vec2)}")
-                return 0.0
-            
-            dot_product = sum(a * b for a, b in zip(vec1, vec2))
-            magnitude1 = math.sqrt(sum(a * a for a in vec1))
-            magnitude2 = math.sqrt(sum(a * a for a in vec2))
-            
-            if magnitude1 == 0 or magnitude2 == 0:
-                return 0.0
-            
-            similarity = dot_product / (magnitude1 * magnitude2)
-            
-            # Ensure result is between -1 and 1
-            return max(-1.0, min(1.0, similarity))
-            
-        except Exception as e:
-            logger.error(f"Error calculating cosine similarity: {e}")
-            return 0.0
-
     def get_affiliate_link_by_platform(self, influencer_id: str, platform: str) -> Optional[Dict]:
         """FIXED: Get specific affiliate link by platform with enhanced credential mapping"""
         try:
@@ -1456,21 +1341,38 @@ class Database:
                     enhanced_link['partner_tag'] = affiliate_link.get('partner_tag', affiliate_link.get('affiliate_id', ''))
                     
                 elif platform == 'rakuten':
-                    # Map all possible Rakuten credential field names
-                    client_id = (
-                        affiliate_link.get('client_id') or 
-                        affiliate_link.get('rakuten_client_id') or 
-                        affiliate_link.get('application_id') or
-                        affiliate_link.get('affiliate_id')  # Fallback
+                    # FIXED: Map all possible Rakuten credential field names with fallbacks
+                    application_id = (
+                        affiliate_link.get('application_id') or 
+                        affiliate_link.get('rakuten_application_id') or 
+                        affiliate_link.get('client_id') or
+                        affiliate_link.get('rakuten_client_id') or
+                        affiliate_link.get('api_key') or
+                        affiliate_link.get('affiliate_id')  # Last resort
                     )
                     
-                    enhanced_link['client_id'] = client_id
-                    enhanced_link['rakuten_client_id'] = client_id
-                    enhanced_link['application_id'] = client_id
-                    enhanced_link['affiliate_id'] = affiliate_link.get('affiliate_id', '')
-                    enhanced_link['client_secret'] = affiliate_link.get('client_secret', '')
+                    client_secret = (
+                        affiliate_link.get('client_secret') or
+                        affiliate_link.get('rakuten_client_secret') or
+                        affiliate_link.get('secret_key')
+                    )
                     
-                    logger.info(f"🔑 Rakuten credentials mapped: client_id={client_id[:10] if client_id else 'missing'}...")
+                    # CRITICAL: Ensure all field variations are mapped
+                    enhanced_link.update({
+                        'application_id': application_id,
+                        'rakuten_application_id': application_id,
+                        'client_id': application_id,
+                        'rakuten_client_id': application_id,
+                        'api_key': application_id,
+                        'affiliate_id': affiliate_link.get('affiliate_id', application_id),
+                        'client_secret': client_secret,
+                        'rakuten_client_secret': client_secret,
+                        'secret_key': client_secret
+                    })
+                    
+                    logger.info(f"🔑 Rakuten credentials mapped:")
+                    logger.info(f"   - Application ID: {application_id[:10] if application_id else 'missing'}...")
+                    logger.info(f"   - Has Client Secret: {bool(client_secret)}")
                     
                 elif platform == 'shareasale':
                     enhanced_link['shareasale_api_token'] = affiliate_link.get('api_token', '')
@@ -1488,7 +1390,7 @@ class Database:
                 logger.info(f"✅ Affiliate link retrieved: {platform} for {influencer_id}")
                 return enhanced_link
             else:
-                logger.info(f"📝 No affiliate link found: {platform} for {influencer_id}")
+                logger.info(f"🔍 No affiliate link found: {platform} for {influencer_id}")
                 return None
                 
         except Exception as e:
@@ -1605,15 +1507,17 @@ class Database:
     # =============================================================================
 
     def get_chat_analytics(self, influencer_id: str, days: int = 30) -> Dict:
-        """FIXED: Get comprehensive chat analytics"""
+        """FIXED: Get comprehensive chat analytics with proper Supabase query syntax"""
         try:
             from datetime import timedelta
             start_date = datetime.now(timezone.utc) - timedelta(days=days)
             
+            # FIXED: Use correct Supabase query syntax
             response = self.supabase.table('chat_interactions') \
                 .select('*') \
                 .eq('influencer_id', influencer_id) \
                 .gte('created_at', start_date.isoformat()) \
+                .order('created_at', desc=True) \
                 .execute()
             
             interactions = response.data if response.data else []
@@ -1626,29 +1530,6 @@ class Database:
             video_responses = len([chat for chat in interactions if chat.get('has_video')])
             audio_responses = len([chat for chat in interactions if chat.get('has_audio')])
             
-            # Group by date for daily stats
-            daily_stats = {}
-            for interaction in interactions:
-                date = interaction["created_at"][:10]  # YYYY-MM-DD
-                if date not in daily_stats:
-                    daily_stats[date] = {
-                        'chats': 0,
-                        'knowledge_enhanced': 0,
-                        'products_included': 0,
-                        'video_responses': 0,
-                        'audio_responses': 0
-                    }
-                
-                daily_stats[date]['chats'] += 1
-                if interaction.get('knowledge_enhanced'):
-                    daily_stats[date]['knowledge_enhanced'] += 1
-                if interaction.get('products_included'):
-                    daily_stats[date]['products_included'] += 1
-                if interaction.get('has_video'):
-                    daily_stats[date]['video_responses'] += 1
-                if interaction.get('has_audio'):
-                    daily_stats[date]['audio_responses'] += 1
-            
             analytics_data = {
                 "total_chats": total_chats,
                 "unique_visitors": unique_sessions,
@@ -1656,7 +1537,6 @@ class Database:
                 "product_recommendation_chats": product_recommendation_chats,
                 "video_responses": video_responses,
                 "audio_responses": audio_responses,
-                "daily_stats": daily_stats,
                 "avg_daily_chats": total_chats / days if days > 0 else 0,
                 "knowledge_usage_rate": (knowledge_enhanced_chats / total_chats * 100) if total_chats > 0 else 0,
                 "product_recommendation_rate": (product_recommendation_chats / total_chats * 100) if total_chats > 0 else 0,
@@ -1675,7 +1555,6 @@ class Database:
                 "product_recommendation_chats": 0,
                 "video_responses": 0,
                 "audio_responses": 0,
-                "daily_stats": {},
                 "avg_daily_chats": 0,
                 "knowledge_usage_rate": 0,
                 "product_recommendation_rate": 0,

@@ -67,14 +67,14 @@ class EnhancedChatbot:
 
     def get_comprehensive_chat_response(self, message, influencer_id=None, session_id=None, 
                                     influencer_name=None, voice_mode=False, video_mode=True):
-        """MAIN METHOD: Comprehensive chat response with all features"""
+        """FIXED: Comprehensive chat response with all features and correct return format"""
         try:
-            print(f"🤖 Processing comprehensive chat for {influencer_name}: {message[:50]}...")
+            logger.info(f"🤖 Processing comprehensive chat for {influencer_name}: {message[:50]}...")
             
             # Get influencer data
             influencer = self.db.get_influencer(influencer_id) if self.db and influencer_id else None
             
-            # Generate text response with COMPLETE knowledge integration
+            # Generate text response with complete knowledge integration
             text_response = self.get_chat_response_with_complete_knowledge(
                 message=message,
                 influencer_id=influencer_id,
@@ -87,13 +87,15 @@ class EnhancedChatbot:
             # Determine if products were included
             products_included = self._is_product_query(message) and self.affiliate_service and influencer_id
             
-            # Prepare response data
+            # Prepare comprehensive response data
             response_data = {
                 'text': text_response,
                 'session_id': session_id or f"session_{int(time.time())}",
                 'video_url': '',
                 'audio_url': '',
                 'has_avatar': False,
+                'has_audio': False,
+                'has_video': False,
                 'voice_id': Config.DEFAULT_VOICE_ID,
                 'knowledge_enhanced': True,
                 'products_included': products_included,
@@ -118,17 +120,19 @@ class EnhancedChatbot:
                     'personality': influencer.get('personality', '')
                 }
             
-            print(f"✅ Comprehensive response generated with products: {products_included}")
+            logger.info(f"✅ Comprehensive response generated with products: {products_included}")
             return response_data
             
         except Exception as e:
-            print(f"❌ Comprehensive chat response error: {str(e)}")
+            logger.error(f"❌ Comprehensive chat response error: {str(e)}")
             return {
                 'text': self.get_fallback_response(message, influencer_name),
                 'session_id': session_id or f"session_{int(time.time())}",
                 'video_url': '',
                 'audio_url': '',
                 'has_avatar': False,
+                'has_audio': False,
+                'has_video': False,
                 'voice_id': Config.DEFAULT_VOICE_ID,
                 'knowledge_enhanced': False,
                 'products_included': False,
@@ -448,12 +452,12 @@ class EnhancedChatbot:
 
     # FIXED: Voice generation methods with correct signatures
     def generate_audio_response(self, text_response, voice_id=None):
-        """FIXED: Generate audio response using influencer's selected voice"""
+        """FIXED: Generate audio response using influencer's selected voice with correct signature"""
         try:
             if not voice_id:
                 voice_id = Config.DEFAULT_VOICE_ID
             
-            print(f"🔊 Generating audio response with voice: {voice_id}")
+            logger.info(f"🔊 Generating audio response with voice: {voice_id}")
             
             # Use OpenAI TTS as primary option
             audio_url = self._generate_openai_tts_audio(text_response, voice_id)
@@ -468,7 +472,7 @@ class EnhancedChatbot:
             return None
                 
         except Exception as e:
-            print(f"❌ Audio response generation error: {e}")
+            logger.error(f"❌ Audio response generation error: {e}")
             return None
 
     def generate_voice_audio(self, text, voice_id=None):
@@ -476,7 +480,7 @@ class EnhancedChatbot:
         return self.generate_audio_response(text, voice_id)
 
     def _generate_openai_tts_audio(self, text, voice_id=None):
-        """Generate audio using OpenAI's TTS API with voice mapping"""
+        """FIXED: Generate audio using OpenAI's TTS API with voice mapping"""
         try:
             # Prepare text for voice
             voice_text = self._prepare_text_for_voice(text)
@@ -494,11 +498,11 @@ class EnhancedChatbot:
             if voice_id and voice_id.startswith('custom_'):
                 # For custom voices, use a similar sounding default voice
                 openai_voice = 'nova'  # Default for custom voices
-                print(f"🔊 Using default voice for custom voice ID: {voice_id}")
+                logger.info(f"🔊 Using default voice for custom voice ID: {voice_id}")
             else:
                 openai_voice = voice_mapping.get(voice_id, 'nova')
             
-            print(f"🔊 Using OpenAI TTS with voice: {openai_voice} (mapped from {voice_id})")
+            logger.info(f"🔊 Using OpenAI TTS with voice: {openai_voice} (mapped from {voice_id})")
             
             response = self.client.audio.speech.create(
                 model="tts-1-hd",
@@ -512,11 +516,11 @@ class EnhancedChatbot:
             audio_content = response.content
             audio_base64 = base64.b64encode(audio_content).decode('utf-8')
             
-            print(f"✅ OpenAI TTS audio generated")
+            logger.info(f"✅ OpenAI TTS audio generated")
             return f"data:audio/mpeg;base64,{audio_base64}"
             
         except Exception as e:
-            print(f"❌ OpenAI TTS error: {str(e)}")
+            logger.error(f"❌ OpenAI TTS error: {str(e)}")
             return None
 
     def _generate_elevenlabs_audio(self, text, voice_id=None):
@@ -567,7 +571,7 @@ class EnhancedChatbot:
             return None
 
     def _prepare_text_for_voice(self, text):
-        """Prepare text specifically for voice generation"""
+        """FIXED: Prepare text specifically for voice generation"""
         lines = text.split('\n')
         clean_lines = []
         
@@ -590,33 +594,33 @@ class EnhancedChatbot:
         return clean_text
 
     def generate_enhanced_video_response(self, text_response, influencer_id, voice_id=None):
-        """Generate video response with enhanced voice integration"""
+        """FIXED: Generate video response with enhanced voice integration"""
         if not self.db or not influencer_id:
-            print("❌ No database or influencer ID for video generation")
+            logger.error("❌ No database or influencer ID for video generation")
             return ""
         
         try:
             # Get influencer data with avatar and voice info
             influencer = self.db.get_influencer(influencer_id)
             if not influencer:
-                print(f"❌ Influencer not found: {influencer_id}")
+                logger.error(f"❌ Influencer not found: {influencer_id}")
                 return ""
             
             avatar_id = influencer.get('heygen_avatar_id')
             if not avatar_id:
-                print(f"❌ No avatar ID found for influencer: {influencer_id}")
+                logger.error(f"❌ No avatar ID found for influencer: {influencer_id}")
                 return ""
             
-            # FIXED: Use influencer's selected voice or provided voice_id
+            # Use influencer's selected voice or provided voice_id
             if not voice_id:
                 voice_id = influencer.get('preferred_voice_id') or influencer.get('voice_id') or Config.DEFAULT_VOICE_ID
             
-            print(f"🎬 Generating video with avatar: {avatar_id}, voice: {voice_id}")
+            logger.info(f"🎬 Generating video with avatar: {avatar_id}, voice: {voice_id}")
             
             return self.generate_video_response(text_response, avatar_id, voice_id)
             
         except Exception as e:
-            print(f"❌ Enhanced video generation error: {e}")
+            logger.error(f"❌ Enhanced video generation error: {e}")
             return ""
 
     def generate_video_response(self, text_response, avatar_id, voice_id=None):
@@ -687,7 +691,7 @@ class EnhancedChatbot:
             return ""
     
     def _prepare_text_for_video(self, text):
-        """Prepare text for video generation by cleaning and limiting length"""
+        """FIXED: Prepare text for video generation by cleaning and limiting length"""
         lines = text.split('\n')
         clean_lines = []
         
@@ -806,7 +810,7 @@ class EnhancedChatbot:
 
 # FIXED: Backwards compatibility
 class Chatbot(EnhancedChatbot):
-    """FIXED: Backwards compatible Chatbot class with all methods"""
+    """FIXED: Backwards compatible Chatbot class with all required methods"""
     
     def generate_voice_audio(self, text, voice_id=None):
         """FIXED: Backwards compatibility method with correct signature"""
