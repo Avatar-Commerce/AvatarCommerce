@@ -1,0 +1,2116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Affiliate Management - AvatarCommerce</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            color: #333;
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+        }
+        
+        /* Enhanced Sidebar */
+        .sidebar {
+            width: 280px;
+            background: linear-gradient(180deg, #1e293b 0%, #334155 100%);
+            color: #fff;
+            height: 100vh;
+            position: fixed;
+            left: 0;
+            top: 0;
+            overflow-y: auto;
+            box-shadow: 4px 0 20px rgba(0, 0, 0, 0.1);
+        }
+        
+        .sidebar-header {
+            padding: 30px 25px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.05);
+        }
+        
+        .logo {
+            font-size: 1.6rem;
+            font-weight: 800;
+            color: #fff;
+        }
+        
+        .logo span {
+            background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .sidebar-menu {
+            padding: 25px 0;
+        }
+        
+        .menu-category {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.5);
+            margin: 20px 25px 12px;
+            letter-spacing: 1.2px;
+            font-weight: 600;
+        }
+        
+        .menu-item {
+            display: flex;
+            align-items: center;
+            padding: 14px 25px;
+            color: rgba(255, 255, 255, 0.8);
+            text-decoration: none;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+        
+        .menu-item::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 0;
+            background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+            transition: width 0.3s ease;
+        }
+        
+        .menu-item:hover::before,
+        .menu-item.active::before {
+            width: 4px;
+        }
+        
+        .menu-item:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: #fff;
+            transform: translateX(2px);
+        }
+        
+        .menu-item.active {
+            background: rgba(96, 165, 250, 0.15);
+            color: #60a5fa;
+        }
+        
+        .menu-item i {
+            margin-right: 12px;
+            font-size: 1.1rem;
+            width: 22px;
+            text-align: center;
+        }
+        
+        /* Main content */
+        .main-content {
+            margin-left: 280px;
+            flex: 1;
+            padding: 30px;
+            background: #fafbfc;
+        }
+        
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 40px;
+            padding: 25px 30px;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        }
+        
+        .page-title {
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: #1e293b;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .page-title i {
+            color: #3b82f6;
+        }
+        
+        .header-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        /* Enhanced Alert System */
+        .alert {
+            padding: 16px 20px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+            display: none;
+            font-weight: 500;
+            border: 1px solid;
+            animation: slideDown 0.3s ease-out;
+        }
+        
+        .alert.show {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .alert-success {
+            background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+            color: #065f46;
+            border-color: #86efac;
+        }
+        
+        .alert-error {
+            background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+            color: #991b1b;
+            border-color: #f87171;
+        }
+        
+        .alert-warning {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            color: #92400e;
+            border-color: #fbbf24;
+        }
+        
+        .alert-info {
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            color: #1e40af;
+            border-color: #60a5fa;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Enhanced Stats Grid */
+        .stats-overview {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 35px;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 16px;
+            padding: 25px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            border: 1px solid #e2e8f0;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        }
+
+        .stat-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+        }
+
+        .stat-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 15px;
+        }
+
+        .stat-icon {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.3rem;
+        }
+
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: #1e293b;
+            margin-bottom: 5px;
+            line-height: 1;
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            color: #64748b;
+            margin-bottom: 8px;
+        }
+
+        .stat-change {
+            font-size: 0.8rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .stat-change.positive {
+            color: #059669;
+        }
+
+        .stat-change.negative {
+            color: #dc2626;
+        }
+
+        /* Platform Cards Grid */
+        .platforms-section {
+            margin-bottom: 40px;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 25px;
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #1e293b;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .platforms-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+            gap: 24px;
+        }
+
+        .platform-card {
+            background: white;
+            border-radius: 20px;
+            padding: 28px;
+            box-shadow: 0 6px 30px rgba(0, 0, 0, 0.08);
+            border: 1px solid #e2e8f0;
+            transition: all 0.4s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .platform-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 6px;
+            background: var(--platform-color);
+            opacity: 0.8;
+        }
+
+        .platform-card:hover {
+            transform: translateY(-6px);
+            box-shadow: 0 16px 50px rgba(0, 0, 0, 0.15);
+        }
+
+        .platform-card.connected {
+            border-color: #10b981;
+            background: linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%);
+        }
+
+        .platform-card.connected::before {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+
+        .platform-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .platform-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .platform-logo {
+            width: 52px;
+            height: 52px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4rem;
+            font-weight: 800;
+            color: white;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .platform-logo::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: var(--platform-color);
+            opacity: 0.9;
+        }
+
+        .platform-logo span {
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Platform-specific colors */
+        .platform-card.amazon {
+            --platform-color: linear-gradient(135deg, #ff9900 0%, #ff6600 100%);
+        }
+
+        .platform-card.rakuten {
+            --platform-color: linear-gradient(135deg, #bf0000 0%, #e60026 100%);
+        }
+
+        .platform-card.shareasale {
+            --platform-color: linear-gradient(135deg, #0066cc 0%, #004499 100%);
+        }
+
+        .platform-card.cj_affiliate {
+            --platform-color: linear-gradient(135deg, #6b46c1 0%, #553c9a 100%);
+        }
+
+        .platform-card.skimlinks {
+            --platform-color: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+
+        .platform-details {
+            flex: 1;
+        }
+
+        .platform-name {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 4px;
+        }
+
+        .platform-description {
+            font-size: 0.85rem;
+            color: #64748b;
+            line-height: 1.4;
+        }
+
+        .platform-status {
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-connected {
+            background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+            color: #065f46;
+            border: 1px solid #86efac;
+        }
+
+        .status-disconnected {
+            background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+            color: #991b1b;
+            border: 1px solid #f87171;
+        }
+
+        .platform-metrics {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .metric-item {
+            text-align: center;
+            padding: 12px;
+            background: #f8fafc;
+            border-radius: 10px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .metric-value {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 2px;
+        }
+
+        .metric-label {
+            font-size: 0.75rem;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .platform-features {
+            margin: 20px 0;
+        }
+
+        .features-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .feature-tag {
+            background: rgba(59, 130, 246, 0.1);
+            color: #1e40af;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            border: 1px solid rgba(59, 130, 246, 0.2);
+        }
+
+        .platform-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 25px;
+        }
+
+        /* Enhanced Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 10px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0) 100%);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .btn:hover::before {
+            opacity: 1;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.4);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+        }
+
+        .btn-success:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(16, 185, 129, 0.4);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            color: #475569;
+            border: 1px solid #cbd5e1;
+        }
+
+        .btn-secondary:hover {
+            background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);
+            transform: translateY(-1px);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+        }
+
+        .btn-danger:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(239, 68, 68, 0.4);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        /* Enhanced Modals */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .modal {
+            background: white;
+            border-radius: 20px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25);
+            transform: scale(0.9) translateY(20px);
+            transition: transform 0.3s ease;
+        }
+
+        .modal-overlay.active .modal {
+            transform: scale(1) translateY(0);
+        }
+
+        .modal-header {
+            padding: 25px 30px;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+        }
+
+        .modal-title {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #1e293b;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .modal-close {
+            width: 32px;
+            height: 32px;
+            background: none;
+            border: none;
+            font-size: 1.2rem;
+            cursor: pointer;
+            color: #64748b;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+        }
+
+        .modal-close:hover {
+            background: #f1f5f9;
+            color: #ef4444;
+        }
+
+        .modal-body {
+            padding: 30px;
+        }
+
+        .modal-footer {
+            padding: 25px 30px;
+            border-top: 1px solid #e2e8f0;
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+            background: #f8fafc;
+        }
+
+        /* Enhanced Forms */
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #374151;
+            font-size: 0.9rem;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 14px 16px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            transition: all 0.3s ease;
+            background: white;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+        }
+
+        .form-help {
+            font-size: 0.8rem;
+            color: #6b7280;
+            margin-top: 6px;
+            line-height: 1.4;
+        }
+
+        .setup-guide {
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            border: 1px solid #93c5fd;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 25px;
+        }
+
+        .guide-title {
+            font-weight: 600;
+            color: #1e40af;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .guide-content {
+            color: #1e40af;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .guide-steps {
+            list-style: none;
+            margin-top: 15px;
+        }
+
+        .guide-steps li {
+            padding: 5px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .guide-steps li::before {
+            content: '→';
+            color: #3b82f6;
+            font-weight: bold;
+        }
+
+        /* Progress Indicator */
+        .progress-steps {
+            display: flex;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .step {
+            display: flex;
+            align-items: center;
+            flex: 1;
+        }
+
+        .step-number {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: #e2e8f0;
+            color: #64748b;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
+
+        .step.active .step-number {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+        }
+
+        .step.completed .step-number {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+        }
+
+        .step-line {
+            flex: 1;
+            height: 3px;
+            background: #e2e8f0;
+            margin: 0 15px;
+            border-radius: 2px;
+        }
+
+        .step.completed .step-line {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+
+        .step:last-child .step-line {
+            display: none;
+        }
+
+        /* Platform Selection */
+        .platform-selection {
+            display: grid;
+            gap: 16px;
+        }
+
+        .platform-option {
+            display: flex;
+            align-items: center;
+            padding: 20px;
+            border: 2px solid #e2e8f0;
+            border-radius: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: white;
+        }
+
+        .platform-option:hover {
+            border-color: #3b82f6;
+            background: #f8fafc;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.1);
+        }
+
+        .platform-option.selected {
+            border-color: #3b82f6;
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.15);
+        }
+
+        .platform-option input[type="radio"] {
+            margin-right: 20px;
+            scale: 1.3;
+            accent-color: #3b82f6;
+        }
+
+        .platform-option-info {
+            flex: 1;
+        }
+
+        .platform-option-name {
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 6px;
+            font-size: 1.1rem;
+        }
+
+        .platform-option-desc {
+            color: #64748b;
+            font-size: 0.9rem;
+            line-height: 1.4;
+            margin-bottom: 8px;
+        }
+
+        .platform-option-features {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .platform-option-features .feature-tag {
+            font-size: 0.7rem;
+            padding: 2px 8px;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1200px) {
+            .platforms-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .stats-overview {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 70px;
+            }
+            
+            .sidebar-header {
+                padding: 20px 0;
+                text-align: center;
+            }
+            
+            .logo span {
+                display: none;
+            }
+            
+            .menu-category {
+                display: none;
+            }
+            
+            .menu-item span {
+                display: none;
+            }
+            
+            .menu-item {
+                justify-content: center;
+                padding: 15px;
+            }
+            
+            .menu-item i {
+                margin-right: 0;
+                font-size: 1.3rem;
+            }
+            
+            .main-content {
+                margin-left: 70px;
+                padding: 20px;
+            }
+
+            .stats-overview {
+                grid-template-columns: 1fr;
+            }
+
+            .header {
+                flex-direction: column;
+                gap: 20px;
+                align-items: stretch;
+            }
+
+            .page-title {
+                font-size: 1.8rem;
+            }
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Enhanced Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">Avatar<span>Commerce</span></div>
+        </div>
+        
+        <nav class="sidebar-menu">
+            <div class="menu-category">Dashboard</div>
+            <a href="dashboard.html" class="menu-item">
+                <i class="fas fa-chart-pie"></i>
+                <span>Overview</span>
+            </a>
+            <a href="analytics.html" class="menu-item">
+                <i class="fas fa-chart-line"></i>
+                <span>Analytics</span>
+            </a>
+            
+            <div class="menu-category">AI Setup</div>
+            <a href="avatar-setup.html" class="menu-item">
+                <i class="fas fa-robot"></i>
+                <span>Avatar Creation</span>
+            </a>
+            <a href="voice-setup.html" class="menu-item">
+                <i class="fas fa-microphone"></i>
+                <span>Voice & Audio</span>
+            </a>
+            <a href="knowledge.html" class="menu-item">
+                <i class="fas fa-brain"></i>
+                <span>Knowledge Base</span>
+            </a>
+            
+            <div class="menu-category">Monetization</div>
+            <a href="affiliate-management.html" class="menu-item active">
+                <i class="fas fa-handshake"></i>
+                <span>Affiliate Partners</span>
+            </a>
+            
+            <div class="menu-category">Settings</div>
+            <a href="settings.html" class="menu-item">
+                <i class="fas fa-cog"></i>
+                <span>Account Settings</span>
+            </a>
+        </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <div class="header">
+            <div>
+                <h1 class="page-title">
+                    <i class="fas fa-handshake"></i>
+                    Affiliate Management
+                </h1>
+                <p style="color: #64748b; margin-top: 8px;">Connect affiliate platforms to monetize your AI assistant</p>
+            </div>
+            <div class="header-actions">
+                <button id="connect-platform-btn" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> Add Platform
+                </button>
+                <button id="test-connections-btn" class="btn btn-secondary">
+                    <i class="fas fa-flask"></i> Test Connections
+                </button>
+            </div>
+        </div>
+        
+        <!-- Alert Container -->
+        <div id="alert" class="alert"></div>
+
+        <!-- Stats Overview -->
+        <div class="stats-overview">
+            <div class="stat-card">
+                <div class="stat-header">
+                    <div class="stat-icon">
+                        <i class="fas fa-link"></i>
+                    </div>
+                </div>
+                <div class="stat-value" id="connected-platforms">0</div>
+                <div class="stat-label">Connected Platforms</div>
+                <div class="stat-change positive" id="platform-change">
+                    <i class="fas fa-arrow-up"></i> +0 this week
+                </div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-header">
+                    <div class="stat-icon">
+                        <i class="fas fa-shopping-cart"></i>
+                    </div>
+                </div>
+                <div class="stat-value" id="total-products">0</div>
+                <div class="stat-label">Products Available</div>
+                <div class="stat-change positive" id="products-change">
+                    <i class="fas fa-arrow-up"></i> Updated daily
+                </div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-header">
+                    <div class="stat-icon">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                </div>
+                <div class="stat-value" id="recommendations-made">0</div>
+                <div class="stat-label">Recommendations Made</div>
+                <div class="stat-change positive" id="recommendations-change">
+                    <i class="fas fa-arrow-up"></i> +0 this week
+                </div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-header">
+                    <div class="stat-icon">
+                        <i class="fas fa-dollar-sign"></i>
+                    </div>
+                </div>
+                <div class="stat-value" id="earnings-potential">$0</div>
+                <div class="stat-label">Potential Earnings</div>
+                <div class="stat-change positive" id="earnings-change">
+                    <i class="fas fa-arrow-up"></i> Estimate
+                </div>
+            </div>
+        </div>
+
+        <!-- Platforms Section -->
+        <div class="platforms-section">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <i class="fas fa-store"></i>
+                    Affiliate Platforms
+                </h2>
+                <div>
+                    <span style="color: #64748b; font-size: 0.9rem;">
+                        <span id="completion-percentage">0</span>% Complete
+                    </span>
+                </div>
+            </div>
+            
+            <div class="platforms-grid" id="platforms-grid">
+                <!-- Platform cards will be dynamically generated -->
+            </div>
+        </div>
+    </main>
+
+    <!-- Connect Platform Modal -->
+    <div id="connect-platform-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">
+                    <i class="fas fa-plus"></i>
+                    Connect Affiliate Platform
+                </h3>
+                <button class="modal-close" onclick="closeModal('connect-platform-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="progress-steps">
+                    <div class="step active">
+                        <div class="step-number">1</div>
+                        <div class="step-line"></div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">2</div>
+                    </div>
+                </div>
+
+                <h4 style="margin-bottom: 20px; color: #1e293b;">Choose a Platform to Connect</h4>
+                <p style="color: #64748b; margin-bottom: 25px; line-height: 1.5;">
+                    Select an affiliate platform to connect to your account. Each platform offers different products and commission rates.
+                </p>
+
+                <div id="platform-selection" class="platform-selection">
+                    <!-- Platform options will be generated here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('connect-platform-modal')">Cancel</button>
+                <button id="continue-btn" class="btn btn-primary" disabled onclick="proceedToStep2()">
+                    Continue <i class="fas fa-arrow-right"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Platform Configuration Modal -->
+    <div id="platform-config-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">
+                    <i class="fas fa-cog"></i>
+                    Connect <span id="selected-platform-name"></span>
+                </h3>
+                <button class="modal-close" onclick="closeModal('platform-config-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="progress-steps">
+                    <div class="step completed">
+                        <div class="step-number">✓</div>
+                        <div class="step-line"></div>
+                    </div>
+                    <div class="step active">
+                        <div class="step-number">2</div>
+                    </div>
+                </div>
+
+                <div id="platform-setup-guide" class="setup-guide">
+                    <!-- Platform-specific setup guide will be inserted here -->
+                </div>
+
+                <div id="platform-config-form">
+                    <!-- Platform-specific configuration form will be generated here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="goBackToStep1()">
+                    <i class="fas fa-arrow-left"></i> Back
+                </button>
+                <button id="test-connection-btn" class="btn btn-secondary" onclick="testConnection()">
+                    <i class="fas fa-flask"></i> Test Connection
+                </button>
+                <button id="connect-btn" class="btn btn-success" onclick="connectPlatform()">
+                    <i class="fas fa-handshake"></i> Connect Platform
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Remove Platform Modal -->
+    <div id="remove-platform-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">
+                    <i class="fas fa-unlink"></i>
+                    Remove Platform
+                </h3>
+                <button class="modal-close" onclick="closeModal('remove-platform-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="text-align: center; padding: 30px;">
+                    <div style="font-size: 4rem; color: #ef4444; margin-bottom: 20px;">
+                        <i class="fas fa-exclamation-triangle"></i>
+                    </div>
+                    <h4 style="margin-bottom: 15px; color: #1e293b;">Are you sure?</h4>
+                    <p style="color: #64748b; margin-bottom: 25px; line-height: 1.5;">
+                        This will disconnect <strong id="platform-to-remove"></strong> from your account. 
+                        You'll lose access to their product catalog and any analytics data.
+                    </p>
+                    <div style="background: #fef3c7; border: 1px solid #fbbf24; border-radius: 8px; padding: 15px; margin-bottom: 20px;">
+                        <p style="color: #92400e; font-size: 0.9rem;">
+                            <i class="fas fa-info-circle"></i>
+                            You can reconnect this platform later, but you'll need to enter your credentials again.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('remove-platform-modal')">Keep Connected</button>
+                <button id="confirm-remove-btn" class="btn btn-danger" onclick="confirmRemovePlatform()">
+                    <i class="fas fa-unlink"></i> Remove Platform
+                </button>
+            </div>
+        </div>
+    </div>
+
+<!-- FIXED: Affiliate Management JavaScript - Place this in your affiliate-management.html file -->
+<!-- FIXED: Affiliate Management JavaScript - Place this in your affiliate-management.html file -->
+<script>
+    // FIXED: Updated PLATFORM_CONFIGS with correct field validation
+    const PLATFORM_CONFIGS = {
+        amazon: {
+            name: 'Amazon Associates',
+            logo: 'A',
+            fields: [
+                { id: 'access_key', label: 'Access Key', type: 'text', required: true, placeholder: 'AKIA...' },
+                { id: 'secret_key', label: 'Secret Access Key', type: 'password', required: true, placeholder: 'Your secret key' },
+                { id: 'partner_tag', label: 'Associate Tag', type: 'text', required: true, placeholder: 'yoursite-20' }
+            ],
+            help: 'Get your credentials from the Amazon Associates program dashboard.',
+            setup_steps: [
+                'Log in to your Amazon Associates account',
+                'Go to Tools → Product Advertising API',
+                'Copy your Access Key, Secret Key, and Associate Tag',
+                'Paste them in the form below'
+            ]
+        },
+        rakuten: {
+            name: 'Rakuten Advertising',
+            logo: 'R',
+            fields: [
+                { 
+                    id: 'client_id', 
+                    label: 'Application ID (Client ID)', 
+                    type: 'text', 
+                    required: true, 
+                    placeholder: 'Your Rakuten Application ID (e.g., 1234567890)',
+                    help: 'This is your main credential - get it from Rakuten Developer Console'
+                },
+                { 
+                    id: 'client_secret', 
+                    label: 'Client Secret (Optional)', 
+                    type: 'password', 
+                    required: false, 
+                    placeholder: 'Your Client Secret (if available)',
+                    help: 'Optional - only needed for some Rakuten API endpoints'
+                },
+                { 
+                    id: 'affiliate_id', 
+                    label: 'Affiliate ID (Optional)', 
+                    type: 'text', 
+                    required: false, 
+                    placeholder: 'Your Affiliate ID (if available)',
+                    help: 'Optional - only needed if you have a Rakuten Affiliate account'
+                }
+            ],
+            help: 'For Rakuten Ichiba API, you primarily need the Application ID. Get it from the Rakuten Developer Console.',
+            setup_steps: [
+                'Go to Rakuten Developers (https://webservice.rakuten.co.jp/)',
+                'Register or log in to your account',
+                'Create a new application to get your Application ID',
+                'Copy the Application ID (this is your main credential)',
+                'Optionally get Client Secret and Affiliate ID if you have them'
+            ]
+        },
+        shareasale: {
+            name: 'ShareASale',
+            logo: 'S',
+            fields: [
+                { id: 'api_token', label: 'API Token', type: 'password', required: true, placeholder: 'Your API token' },
+                { id: 'secret_key', label: 'Secret Key', type: 'password', required: true, placeholder: 'Your secret key' },
+                { id: 'affiliate_id', label: 'Affiliate ID', type: 'text', required: true, placeholder: 'Your affiliate ID' }
+            ],
+            help: 'Get your API credentials from ShareASale\'s API documentation section.',
+            setup_steps: [
+                'Log in to your ShareASale account',
+                'Go to Tools → API Documentation',
+                'Generate or find your API Token and Secret Key',
+                'Also note your Affiliate ID from your account dashboard'
+            ]
+        },
+        cj_affiliate: {
+            name: 'CJ Affiliate',
+            logo: 'CJ',
+            fields: [
+                { id: 'api_key', label: 'API Key', type: 'password', required: true, placeholder: 'Your CJ API key' },
+                { id: 'website_id', label: 'Website ID', type: 'text', required: true, placeholder: 'Your website ID' }
+            ],
+            help: 'Access your API key from the CJ Affiliate developer portal.',
+            setup_steps: [
+                'Log in to your CJ Affiliate account',
+                'Visit the Developer Portal',
+                'Generate an API Key for Product Search',
+                'Find your Website ID in account settings'
+            ]
+        },
+        skimlinks: {
+            name: 'Skimlinks',
+            logo: 'SK',
+            fields: [
+                { id: 'api_key', label: 'API Key', type: 'password', required: true, placeholder: 'Your Skimlinks API key' },
+                { id: 'publisher_id', label: 'Publisher ID', type: 'text', required: true, placeholder: 'Your publisher ID' }
+            ],
+            help: 'Find your API credentials in the Skimlinks Hub under Developer Tools.',
+            setup_steps: [
+                'Log in to Skimlinks Hub',
+                'Go to Developer Tools → API Access',
+                'Generate an API Key',
+                'Copy your Publisher ID from account settings'
+            ]
+        }
+    };
+    
+    class AffiliateManager {
+        constructor() {
+            this.API_BASE = 'http://localhost:2000/api';
+            this.selectedPlatform = null;
+            this.platformsData = {};
+            this.stats = {};
+            this.platformToRemove = null;
+            
+            this.init();
+        }
+    
+        async init() {
+            try {
+                // Check authentication
+                if (!this.checkAuth()) return;
+                
+                // Load platform data
+                await this.loadPlatformData();
+                
+                // Setup event listeners
+                this.setupEventListeners();
+                
+                // Initial render
+                this.renderDashboard();
+                
+                console.log('✅ Affiliate Manager initialized');
+            } catch (error) {
+                console.error('❌ Initialization failed:', error);
+                this.showAlert('Failed to initialize affiliate management', 'error');
+            }
+        }
+    
+        checkAuth() {
+            const token = localStorage.getItem('token');
+            const userStr = localStorage.getItem('user');
+            
+            if (!token || !userStr) {
+                window.location.href = './login.html';
+                return false;
+            }
+            
+            try {
+                const user = JSON.parse(userStr);
+                if (user.userType !== 'influencer') {
+                    window.location.href = './login.html';
+                    return false;
+                }
+                return true;
+            } catch (error) {
+                window.location.href = './login.html';
+                return false;
+            }
+        }
+    
+        async loadPlatformData() {
+            try {
+                const token = localStorage.getItem('token');
+                
+                const response = await fetch(`${this.API_BASE}/affiliate/platform-status`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load platform data');
+                }
+                
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    this.platformsData = data.data.platforms;
+                    this.stats = data.data.stats;
+                    console.log('✅ Platform data loaded successfully');
+                } else {
+                    throw new Error(data.message || 'Failed to load platform data');
+                }
+                
+            } catch (error) {
+                console.error('❌ Error loading platform data:', error);
+                this.loadDefaultPlatformData();
+            }
+        }
+    
+        loadDefaultPlatformData() {
+            this.platformsData = {
+                amazon: {
+                    name: 'Amazon Associates',
+                    logo: 'A',
+                    description: 'World\'s largest online retailer with millions of products',
+                    commission_range: '1-10%',
+                    min_payout: '$10',
+                    payment_schedule: 'Monthly',
+                    special_features: ['Product reviews', 'Prime eligibility', 'Lightning deals'],
+                    connected: false,
+                    estimated_products: 0
+                },
+                rakuten: {
+                    name: 'Rakuten Advertising',
+                    logo: 'R',
+                    fields: [
+                        { 
+                            id: 'client_id', 
+                            label: 'Client ID', 
+                            type: 'text', 
+                            required: true, 
+                            placeholder: 'Your Rakuten Client ID (e.g., abc123def456)',
+                            help: 'Get this from your Rakuten Advertising Developer Portal'
+                        },
+                        { 
+                            id: 'client_secret', 
+                            label: 'Client Secret', 
+                            type: 'password', 
+                            required: true, 
+                            placeholder: 'Your Rakuten Client Secret',
+                            help: 'Keep this secret! Get it from the same place as your Client ID'
+                        },
+                        { 
+                            id: 'application_id', 
+                            label: 'Application ID (Optional)', 
+                            type: 'text', 
+                            required: false, 
+                            placeholder: 'Your Application ID (if available)',
+                            help: 'Optional - only needed for some advanced features'
+                        }
+                    ],
+                    help: 'Get your credentials from the Rakuten Advertising Developer Portal at https://developers.rakutenadvertising.com/',
+                    setup_steps: [
+                        'Go to https://developers.rakutenadvertising.com/',
+                        'Log in with your Rakuten Advertising account',
+                        'Navigate to "Developer" → "API Access" or "App Management"',
+                        'Create a new application or select existing one',
+                        'Copy your Client ID and Client Secret',
+                        'Paste them in the form below to connect your account'
+                    ]
+                },
+                shareasale: {
+                    name: 'ShareASale',
+                    logo: 'S',
+                    description: 'Performance marketing network with diverse merchants',
+                    commission_range: '3-20%',
+                    min_payout: '$50',
+                    payment_schedule: '20th of each month',
+                    special_features: ['Real-time tracking', 'Custom links', 'Merchant variety'],
+                    connected: false,
+                    estimated_products: 0
+                },
+                cj_affiliate: {
+                    name: 'CJ Affiliate',
+                    logo: 'CJ',
+                    description: 'Commission Junction - trusted by top brands worldwide',
+                    commission_range: '2-12%',
+                    min_payout: '$50',
+                    payment_schedule: 'Monthly',
+                    special_features: ['Enterprise brands', 'Deep linking', 'Attribution tracking'],
+                    connected: false,
+                    estimated_products: 0
+                },
+                skimlinks: {
+                    name: 'Skimlinks',
+                    logo: 'SK',
+                    description: 'Automated affiliate marketing with 48,500+ merchants',
+                    commission_range: '1-8%',
+                    min_payout: '$10',
+                    payment_schedule: 'Monthly',
+                    special_features: ['Auto-affiliate', 'Content monetization', 'Easy setup'],
+                    connected: false,
+                    estimated_products: 0
+                }
+            };
+    
+            this.stats = {
+                connected_platforms: 0,
+                estimated_products: 0,
+                recommendations_made: 0,
+                potential_earnings: 0,
+                completion_percentage: 0
+            };
+        }
+    
+        setupEventListeners() {
+            document.getElementById('connect-platform-btn').addEventListener('click', () => {
+                this.openConnectModal();
+            });
+    
+            document.getElementById('test-connections-btn').addEventListener('click', () => {
+                this.testAllConnections();
+            });
+    
+            document.addEventListener('click', (e) => {
+                if (e.target.classList.contains('modal-overlay') && e.target.classList.contains('active')) {
+                    this.closeModal(e.target.id);
+                }
+            });
+    
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    this.closeAllModals();
+                }
+            });
+        }
+    
+        renderDashboard() {
+            this.updateStats();
+            this.renderPlatformCards();
+        }
+    
+        updateStats() {
+            try {
+                document.getElementById('connected-platforms').textContent = this.stats.connected_platforms || 0;
+                document.getElementById('total-products').textContent = (this.stats.estimated_products || 0).toLocaleString();
+                document.getElementById('recommendations-made').textContent = (this.stats.recommendations_made || 0).toLocaleString();
+                document.getElementById('earnings-potential').textContent = `$${(this.stats.potential_earnings || 0).toLocaleString()}`;
+                document.getElementById('completion-percentage').textContent = Math.round(this.stats.completion_percentage || 0);
+                
+                console.log('📊 Stats updated');
+            } catch (error) {
+                console.error('❌ Error updating stats:', error);
+            }
+        }
+    
+        renderPlatformCards() {
+            const container = document.getElementById('platforms-grid');
+            container.innerHTML = '';
+    
+            Object.entries(this.platformsData).forEach(([key, platform]) => {
+                const card = this.createPlatformCard(key, platform);
+                container.appendChild(card);
+            });
+    
+            console.log('🎨 Platform cards rendered');
+        }
+    
+        createPlatformCard(platformKey, platform) {
+            const card = document.createElement('div');
+            card.className = `platform-card ${platformKey} ${platform.connected ? 'connected' : ''}`;
+            
+            const connectedBadge = platform.connected 
+                ? '<span class="status-connected">✓ Connected</span>'
+                : '<span class="status-disconnected">○ Not Connected</span>';
+    
+            const actionButtons = platform.connected 
+                ? `
+                    <button class="btn btn-secondary" onclick="affiliateManager.testPlatformConnection('${platformKey}')">
+                        <i class="fas fa-flask"></i> Test
+                    </button>
+                    <button class="btn btn-secondary" onclick="affiliateManager.viewAnalytics('${platformKey}')">
+                        <i class="fas fa-chart-bar"></i> Analytics
+                    </button>
+                    <button class="btn btn-danger" onclick="affiliateManager.removePlatform('${platformKey}', '${platform.name}')">
+                        <i class="fas fa-unlink"></i> Remove
+                    </button>
+                `
+                : `
+                    <button class="btn btn-primary" onclick="affiliateManager.connectPlatformDirect('${platformKey}')">
+                        <i class="fas fa-plus"></i> Connect ${platform.name}
+                    </button>
+                `;
+    
+            card.innerHTML = `
+                <div class="platform-header">
+                    <div class="platform-info">
+                        <div class="platform-logo">
+                            <span>${platform.logo}</span>
+                        </div>
+                        <div class="platform-details">
+                            <div class="platform-name">${platform.name}</div>
+                            <div class="platform-description">${platform.description}</div>
+                        </div>
+                    </div>
+                    ${connectedBadge}
+                </div>
+                
+                <div class="platform-metrics">
+                    <div class="metric-item">
+                        <div class="metric-value">${platform.commission_range}</div>
+                        <div class="metric-label">Commission</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-value">${platform.min_payout}</div>
+                        <div class="metric-label">Min Payout</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-value">${platform.estimated_products || 0}</div>
+                        <div class="metric-label">Products</div>
+                    </div>
+                </div>
+                
+                <div class="platform-features">
+                    <div class="features-list">
+                        ${platform.special_features.map(feature => 
+                            `<span class="feature-tag">${feature}</span>`
+                        ).join('')}
+                    </div>
+                </div>
+                
+                <div class="platform-actions">
+                    ${actionButtons}
+                </div>
+            `;
+    
+            return card;
+        }
+    
+        openConnectModal() {
+            this.renderPlatformSelection();
+            this.openModal('connect-platform-modal');
+        }
+    
+        renderPlatformSelection() {
+            const container = document.getElementById('platform-selection');
+            container.innerHTML = '';
+    
+            Object.entries(this.platformsData).forEach(([key, platform]) => {
+                if (platform.connected) return;
+    
+                const config = PLATFORM_CONFIGS[key];
+                const credentialInfo = 'Standard API credentials';
+    
+                const option = document.createElement('div');
+                option.className = 'platform-option';
+                option.dataset.platform = key;
+    
+                option.innerHTML = `
+                    <input type="radio" name="platform" value="${key}">
+                    <div class="platform-logo ${key}">
+                        <span>${platform.logo}</span>
+                    </div>
+                    <div class="platform-option-info">
+                        <div class="platform-option-name">${platform.name}</div>
+                        <div class="platform-option-desc">${platform.description}</div>
+                        <div style="font-size: 0.8rem; color: #6b7280; margin: 6px 0;">
+                            <i class="fas fa-key"></i> ${credentialInfo}
+                        </div>
+                        <div class="platform-option-features">
+                            ${platform.special_features.slice(0, 3).map(feature => 
+                                `<span class="feature-tag">${feature}</span>`
+                            ).join('')}
+                        </div>
+                    </div>
+                `;
+    
+                option.addEventListener('click', () => {
+                    this.selectPlatform(key);
+                });
+    
+                container.appendChild(option);
+            });
+        }
+    
+        selectPlatform(platformKey) {
+            this.selectedPlatform = platformKey;
+    
+            document.querySelectorAll('.platform-option').forEach(option => {
+                option.classList.remove('selected');
+                option.querySelector('input').checked = false;
+            });
+    
+            const selectedOption = document.querySelector(`[data-platform="${platformKey}"]`);
+            if (selectedOption) {
+                selectedOption.classList.add('selected');
+                selectedOption.querySelector('input').checked = true;
+            }
+    
+            document.getElementById('continue-btn').disabled = false;
+    
+            console.log('✅ Platform selected:', platformKey);
+        }
+    
+        proceedToStep2() {
+            if (!this.selectedPlatform) {
+                this.showAlert('Please select a platform first', 'error');
+                return;
+            }
+    
+            this.closeModal('connect-platform-modal');
+            this.showPlatformConfig();
+            this.openModal('platform-config-modal');
+        }
+    
+        showPlatformConfig() {
+            const platform = this.platformsData[this.selectedPlatform];
+            
+            document.getElementById('selected-platform-name').textContent = platform.name;
+            this.renderSetupGuide();
+            this.renderConfigForm();
+        }
+    
+        renderSetupGuide() {
+            const guideContainer = document.getElementById('platform-setup-guide');
+            const config = PLATFORM_CONFIGS[this.selectedPlatform];
+    
+            if (!config) {
+                console.error('No configuration found for platform:', this.selectedPlatform);
+                return;
+            }
+    
+            const guideContent = `
+                <div class="guide-title">
+                    <i class="fas fa-info-circle"></i>
+                    ${config.name} Setup
+                </div>
+                <div class="guide-content">
+                    <p>${config.help}</p>
+                    <ul class="guide-steps">
+                        ${config.setup_steps.map(step => `<li>${step}</li>`).join('')}
+                    </ul>
+                </div>
+            `;
+    
+            guideContainer.innerHTML = guideContent;
+        }
+    
+        renderConfigForm() {
+            const formContainer = document.getElementById('platform-config-form');
+            const config = PLATFORM_CONFIGS[this.selectedPlatform];
+    
+            if (!config) {
+                console.error('No configuration found for platform:', this.selectedPlatform);
+                return;
+            }
+    
+            const formHtml = config.fields.map(field => `
+                <div class="form-group">
+                    <label class="form-label" for="${field.id}">
+                        ${field.label} ${field.required ? '<span style="color: #ef4444;">*</span>' : ''}
+                    </label>
+                    <input 
+                        type="${field.type}" 
+                        id="${field.id}" 
+                        class="form-input" 
+                        placeholder="${field.placeholder}"
+                        ${field.required ? 'required' : ''}
+                    >
+                    ${field.help ? `<div class="form-help">${field.help}</div>` : ''}
+                </div>
+            `).join('');
+    
+            formContainer.innerHTML = formHtml;
+        }
+    
+        // FIXED: Better form data collection with detailed validation
+        collectFormData() {
+            const formData = {};
+            const config = PLATFORM_CONFIGS[this.selectedPlatform];
+            let isValid = true;
+            let missingFields = [];
+    
+            if (!config) {
+                console.error('No configuration found for platform:', this.selectedPlatform);
+                this.showAlert('Platform configuration error', 'error');
+                return null;
+            }
+    
+            console.log(`🔍 Collecting form data for ${this.selectedPlatform}`);
+            console.log(`📋 Fields to validate:`, config.fields.map(f => `${f.id} (required: ${f.required})`));
+    
+            // Collect all form fields
+            config.fields.forEach(fieldConfig => {
+                const input = document.getElementById(fieldConfig.id);
+                if (input) {
+                    const value = input.value.trim();
+                    
+                    console.log(`📝 Field ${fieldConfig.id}: "${value}" (required: ${fieldConfig.required})`);
+                    
+                    if (fieldConfig.required && !value) {
+                        input.style.borderColor = '#ef4444';
+                        missingFields.push(fieldConfig.label);
+                        isValid = false;
+                        console.error(`❌ Missing required field: ${fieldConfig.id}`);
+                    } else {
+                        input.style.borderColor = '#e2e8f0';
+                        if (value) {
+                            formData[fieldConfig.id] = value;
+                        }
+                    }
+                } else {
+                    console.error(`❌ Input field not found: ${fieldConfig.id}`);
+                    if (fieldConfig.required) {
+                        missingFields.push(fieldConfig.label);
+                        isValid = false;
+                    }
+                }
+            });
+    
+            // Platform-specific validation
+            if (this.selectedPlatform === 'rakuten') {
+                if (!formData.client_id) {
+                    this.showAlert('Application ID (Client ID) is required for Rakuten', 'error');
+                    isValid = false;
+                } else if (formData.client_id.length < 5) {
+                    this.showAlert('Rakuten Application ID must be at least 5 characters', 'error');
+                    isValid = false;
+                } else if (!/^[a-zA-Z0-9]+$/.test(formData.client_id)) {
+                    this.showAlert('Rakuten Application ID can only contain letters and numbers', 'error');
+                    isValid = false;
+                }
+            }
+    
+            if (!isValid) {
+                const errorMsg = missingFields.length > 0 
+                    ? `Please fill in the following required fields: ${missingFields.join(', ')}`
+                    : 'Please fill in all required fields correctly';
+                    
+                this.showAlert(errorMsg, 'error');
+                console.error(`❌ Form validation failed. Missing: ${missingFields.join(', ')}`);
+                return null;
+            }
+    
+            console.log(`✅ Form validation passed. Data:`, formData);
+            return formData;
+        }
+    
+        async testConnection() {
+            const formData = this.collectFormData();
+            if (!formData) return;
+    
+            const testBtn = document.getElementById('test-connection-btn');
+            const originalHtml = testBtn.innerHTML;
+            
+            try {
+                testBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
+                testBtn.disabled = true;
+    
+                console.log('🔍 Testing connection for', this.selectedPlatform, 'with data:', formData);
+    
+                const token = localStorage.getItem('token');
+                
+                const testPayload = {
+                    platform: this.selectedPlatform,
+                    credentials: formData
+                };
+    
+                const response = await fetch(`${this.API_BASE}/affiliate/test-connection`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(testPayload)
+                });
+    
+                const data = await response.json();
+                console.log('🔍 Test connection response:', data);
+    
+                if (data.status === 'success') {
+                    this.showAlert(`✅ ${this.platformsData[this.selectedPlatform].name} credentials validated!`, 'success');
+                    document.getElementById('connect-btn').disabled = false;
+                } else {
+                    this.showAlert(`❌ Validation failed: ${data.message}`, 'error');
+                }
+    
+            } catch (error) {
+                console.error('❌ Connection test error:', error);
+                this.showAlert('Connection test failed. Please check your network.', 'error');
+            } finally {
+                testBtn.innerHTML = originalHtml;
+                testBtn.disabled = false;
+            }
+        }
+    
+        // FIXED: Connection method with proper data handling
+        async connectPlatformAction() {
+            const formData = this.collectFormData();
+            if (!formData) return;
+    
+            const connectBtn = document.getElementById('connect-btn');
+            const originalHtml = connectBtn.innerHTML;
+    
+            try {
+                connectBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Connecting...';
+                connectBtn.disabled = true;
+    
+                console.log('🔗 Connecting platform', this.selectedPlatform, 'with data:', formData);
+    
+                const token = localStorage.getItem('token');
+                
+                // FIXED: Send data in the format expected by backend
+                const requestData = {
+                    platform: this.selectedPlatform,
+                    ...formData  // Spread form data directly
+                };
+    
+                console.log('📤 Sending to backend:', requestData);
+    
+                const response = await fetch(`${this.API_BASE}/affiliate`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestData)
+                });
+    
+                const responseText = await response.text();
+                console.log('📥 Raw response:', responseText);
+    
+                let data;
+                try {
+                    data = JSON.parse(responseText);
+                } catch (parseError) {
+                    console.error('❌ Failed to parse response:', parseError);
+                    throw new Error(`Invalid response from server: ${responseText.substring(0, 100)}`);
+                }
+    
+                console.log('🔗 Parsed connection response:', data);
+    
+                if (data.status === 'success') {
+                    const platform = this.platformsData[this.selectedPlatform];
+                    this.showAlert(`✅ ${platform.name} connected successfully!`, 'success');
+                    
+                    this.closeModal('platform-config-modal');
+                    await this.loadPlatformData();
+                    this.renderDashboard();
+                } else {
+                    this.showAlert(`❌ Connection failed: ${data.message}`, 'error');
+                }
+    
+            } catch (error) {
+                console.error('❌ Platform connection error:', error);
+                this.showAlert(`Failed to connect platform: ${error.message}`, 'error');
+            } finally {
+                connectBtn.innerHTML = originalHtml;
+                connectBtn.disabled = false;
+            }
+        }
+    
+        connectPlatformDirect(platformKey) {
+            this.selectedPlatform = platformKey;
+            this.showPlatformConfig();
+            this.openModal('platform-config-modal');
+        }
+    
+        removePlatform(platformKey, platformName) {
+            this.platformToRemove = platformKey;
+            document.getElementById('platform-to-remove').textContent = platformName;
+            this.openModal('remove-platform-modal');
+        }
+    
+        async confirmRemovePlatform() {
+            if (!this.platformToRemove) return;
+    
+            try {
+                const token = localStorage.getItem('token');
+                const response = await fetch(`${this.API_BASE}/affiliate/${this.platformToRemove}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+    
+                const data = await response.json();
+    
+                if (data.status === 'success') {
+                    this.showAlert('Platform removed successfully', 'success');
+                    this.closeModal('remove-platform-modal');
+                    await this.loadPlatformData();
+                    this.renderDashboard();
+                } else {
+                    throw new Error(data.message || 'Removal failed');
+                }
+    
+            } catch (error) {
+                console.error('❌ Remove platform error:', error);
+                this.showAlert('Failed to remove platform', 'error');
+            }
+        }
+    
+        goBackToStep1() {
+            this.closeModal('platform-config-modal');
+            this.openModal('connect-platform-modal');
+        }
+    
+        openModal(modalId) {
+            const modal = document.getElementById(modalId);
+            if (modal) {
+                modal.classList.add('active');
+                document.body.style.overflow = 'hidden';
+            }
+        }
+    
+        closeModal(modalId) {
+            const modal = document.getElementById(modalId);
+            if (modal) {
+                modal.classList.remove('active');
+                document.body.style.overflow = 'auto';
+            }
+        }
+    
+        closeAllModals() {
+            document.querySelectorAll('.modal-overlay').forEach(modal => {
+                modal.classList.remove('active');
+            });
+            document.body.style.overflow = 'auto';
+        }
+    
+        showAlert(message, type = 'info') {
+            const alert = document.getElementById('alert');
+            alert.className = `alert alert-${type} show`;
+            alert.innerHTML = `
+                <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>
+                ${message}
+            `;
+    
+            setTimeout(() => {
+                alert.classList.remove('show');
+            }, 5000);
+    
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    
+        async testAllConnections() {
+            const connectedPlatforms = Object.entries(this.platformsData)
+                .filter(([key, platform]) => platform.connected)
+                .map(([key]) => key);
+    
+            if (connectedPlatforms.length === 0) {
+                this.showAlert('No platforms connected to test', 'warning');
+                return;
+            }
+    
+            this.showAlert(`Testing ${connectedPlatforms.length} connected platform(s)...`, 'info');
+    
+            for (const platformKey of connectedPlatforms) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                await this.testPlatformConnection(platformKey);
+            }
+        }
+    
+        async testPlatformConnection(platformKey) {
+            try {
+                const token = localStorage.getItem('token');
+                const response = await fetch(`${this.API_BASE}/affiliate/search-products`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        query: 'test',
+                        platform: platformKey,
+                        limit: 1
+                    })
+                });
+    
+                const data = await response.json();
+                const platform = this.platformsData[platformKey];
+    
+                if (data.status === 'success' && data.data.products.length > 0) {
+                    this.showAlert(`✅ ${platform.name} connection is working`, 'success');
+                } else {
+                    this.showAlert(`⚠️ ${platform.name} connection may have issues`, 'warning');
+                }
+    
+            } catch (error) {
+                const platform = this.platformsData[platformKey];
+                this.showAlert(`❌ ${platform.name} connection test failed`, 'error');
+            }
+        }
+    
+        viewAnalytics(platformKey) {
+            const platform = this.platformsData[platformKey];
+            this.showAlert(`Analytics for ${platform.name} coming soon!`, 'info');
+        }
+    }
+    
+    // FIXED: Global functions for onclick handlers
+    window.proceedToStep2 = () => {
+        if (window.affiliateManager) {
+            window.affiliateManager.proceedToStep2();
+        }
+    };
+    
+    window.connectPlatform = () => {
+        if (window.affiliateManager) {
+            window.affiliateManager.connectPlatformAction();
+        }
+    };
+    
+    window.testConnection = () => {
+        if (window.affiliateManager) {
+            window.affiliateManager.testConnection();
+        }
+    };
+    
+    window.goBackToStep1 = () => {
+        if (window.affiliateManager) {
+            window.affiliateManager.goBackToStep1();
+        }
+    };
+    
+    window.confirmRemovePlatform = () => {
+        if (window.affiliateManager && window.affiliateManager.platformToRemove) {
+            window.affiliateManager.confirmRemovePlatform();
+        }
+    };
+    
+    window.closeModal = (modalId) => {
+        if (window.affiliateManager) {
+            window.affiliateManager.closeModal(modalId);
+        }
+    };
+    
+    // Initialize when page loads
+    document.addEventListener('DOMContentLoaded', () => {
+        try {
+            window.affiliateManager = new AffiliateManager();
+            console.log('✅ Affiliate Manager initialized successfully');
+        } catch (error) {
+            console.error('❌ Failed to initialize Affiliate Manager:', error);
+        }
+    });
+    
+    console.log('✅ Fixed Affiliate Management script loaded');
+    </script>
+</body>
+</html>

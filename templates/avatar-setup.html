@@ -1,0 +1,1867 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Avatar Setup - AvatarCommerce</title>
+    <style>
+        /* Reset and base styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: #f9f9fb;
+            color: #333;
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+        }
+        
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            background-color: #27293d;
+            color: #fff;
+            height: 100vh;
+            position: fixed;
+            left: 0;
+            top: 0;
+            overflow-y: auto;
+        }
+        
+        .sidebar-header {
+            padding: 25px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #fff;
+        }
+        
+        .logo span {
+            color: #64dfdf;
+        }
+        
+        .sidebar-menu {
+            padding: 20px 0;
+        }
+        
+        .menu-category {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.5);
+            margin: 15px 20px 10px;
+            letter-spacing: 1px;
+        }
+        
+        .menu-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            color: rgba(255, 255, 255, 0.8);
+            text-decoration: none;
+            transition: all 0.3s;
+        }
+        
+        .menu-item:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+        
+        .menu-item.active {
+            background-color: #5e60ce;
+            color: #fff;
+            border-left: 4px solid #64dfdf;
+        }
+        
+        .menu-item i {
+            margin-right: 10px;
+            font-size: 1.1rem;
+            width: 20px;
+            text-align: center;
+        }
+        
+        .sidebar-footer {
+            padding: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            background-color: #5e60ce;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .user-details {
+            flex: 1;
+        }
+        
+        .user-name {
+            font-weight: 600;
+            margin-bottom: 2px;
+        }
+        
+        .user-role {
+            font-size: 0.85rem;
+            color: rgba(255, 255, 255, 0.7);
+        }
+        
+        .logout-btn {
+            width: 100%;
+            padding: 8px;
+            background-color: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .logout-btn:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+        
+        /* Main content */
+        .main-content {
+            margin-left: 260px;
+            flex: 1;
+            padding: 30px;
+        }
+        
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        
+        .page-title {
+            font-size: 2rem;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .preview-chat-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            background-color: #5e60ce;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+        
+        .preview-chat-link:hover {
+            background-color: #4c46c7;
+            transform: translateY(-2px);
+        }
+
+        /* Alert system */
+        .alert {
+            display: none;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            border-left: 4px solid;
+        }
+        
+        .alert.success {
+            background-color: #d1fae5;
+            border-left-color: #10b981;
+            color: #065f46;
+        }
+        
+        .alert.error {
+            background-color: #fee2e2;
+            border-left-color: #ef4444;
+            color: #991b1b;
+        }
+        
+        .alert.info {
+            background-color: #dbeafe;
+            border-left-color: #3b82f6;
+            color: #1e40af;
+        }
+
+        .alert.warning {
+            background-color: #fef3c7;
+            border-left-color: #f59e0b;
+            color: #92400e;
+        }
+
+        /* Enhanced Cards */
+        .setup-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+            border: 1px solid #e2e8f0;
+            transition: all 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.12);
+        }
+
+        .card-header {
+            margin-bottom: 20px;
+        }
+
+        .card-title {
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: #1e293b;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .card-title i {
+            color: #5e60ce;
+        }
+
+        /* Upload Area */
+        .upload-area {
+            border: 2px dashed #cbd5e1;
+            border-radius: 12px;
+            padding: 40px 20px;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            min-height: 200px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .upload-area:hover {
+            border-color: #5e60ce;
+            background: #f8fafc;
+        }
+
+        .upload-area.dragover {
+            border-color: #5e60ce;
+            background: #eef2ff;
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 3rem;
+            color: #64748b;
+            margin-bottom: 15px;
+        }
+
+        .upload-area h4 {
+            color: #1e293b;
+            margin-bottom: 8px;
+        }
+
+        .upload-area p {
+            color: #64748b;
+            margin-bottom: 5px;
+        }
+
+        .upload-area small {
+            color: #94a3b8;
+        }
+
+        /* Avatar Preview */
+        .avatar-preview {
+            background: #f8fafc;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            min-height: 300px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #e2e8f0;
+        }
+
+        .avatar-video {
+            max-width: 100%;
+            max-height: 250px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 15px;
+        }
+
+        .placeholder-avatar {
+            width: 120px;
+            height: 120px;
+            background: linear-gradient(135deg, #e2e8f0, #cbd5e1);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+            color: #64748b;
+            margin-bottom: 20px;
+        }
+
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .status-ready {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .status-processing {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .status-error {
+            background: #fecaca;
+            color: #991b1b;
+        }
+
+        /* Voice Selection Enhanced */
+        .voice-selection {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .voice-categories {
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+        }
+
+        .voice-category {
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 20px;
+            background: #f8fafc;
+        }
+
+        .category-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .category-title i {
+            color: #5e60ce;
+        }
+
+        .voice-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 15px;
+        }
+
+        .voice-option {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            margin-bottom: 0;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: white;
+        }
+
+        .voice-option:hover {
+            border-color: #5e60ce;
+            background: #f8fafc;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(94, 96, 206, 0.1);
+        }
+
+        .voice-option.selected {
+            border-color: #5e60ce;
+            background: #eef2ff;
+            box-shadow: 0 4px 12px rgba(94, 96, 206, 0.2);
+        }
+
+        .voice-option input[type="radio"] {
+            margin-right: 15px;
+            scale: 1.2;
+            accent-color: #5e60ce;
+        }
+
+        .voice-info {
+            flex: 1;
+        }
+
+        .voice-name {
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 4px;
+            font-size: 1rem;
+        }
+
+        .voice-details {
+            color: #64748b;
+            font-size: 0.85rem;
+            line-height: 1.4;
+        }
+
+        .voice-preview-btn {
+            background: #5e60ce;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .voice-preview-btn:hover {
+            background: #4c46c7;
+            transform: translateY(-1px);
+        }
+
+        .voice-preview-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .voice-loading {
+            display: flex;
+            align-items: center;
+            color: #64748b;
+        }
+
+        /* Loading States */
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .loading.active {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #e2e8f0;
+            border-top: 4px solid #5e60ce;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Buttons */
+        .btn {
+            background: linear-gradient(135deg, #5e60ce, #7c3aed);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(94, 96, 206, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #64748b, #475569);
+        }
+
+        .btn-secondary:hover {
+            box-shadow: 0 8px 25px rgba(100, 116, 139, 0.3);
+        }
+
+        /* Video controls */
+        .video-controls {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        .btn-small {
+            padding: 8px 16px;
+            font-size: 0.9rem;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1024px) {
+            .setup-grid {
+                grid-template-columns: 1fr;
+                gap: 20px;
+            }
+            
+            .voice-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+                transition: transform 0.3s ease;
+            }
+
+            .sidebar.open {
+                transform: translateX(0);
+            }
+
+            .main-content {
+                margin-left: 0;
+                padding: 20px;
+            }
+
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+
+            .page-title {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+    <!-- Sidebar navigation -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">Avatar<span>Commerce</span></div>
+        </div>
+        
+        <nav class="sidebar-menu">
+            <div class="menu-category">GENERAL</div>
+            <a href="dashboard.html" class="menu-item">
+                <i class="fas fa-tachometer-alt"></i>
+                <span>Dashboard</span>
+            </a>
+            <a href="analytics.html" class="menu-item">
+                <i class="fas fa-chart-line"></i>
+                <span>Analytics</span>
+            </a>
+            
+            <div class="menu-category">AVATAR</div>
+            <a href="avatar-setup.html" class="menu-item active">
+                <i class="fas fa-robot"></i>
+                <span>Avatar Setup</span>
+            </a>
+            <a href="voice-setup.html" class="menu-item">
+                <i class="fas fa-microphone"></i>
+                <span>Voice Setup</span>
+            </a>
+            <a href="knowledge.html" class="menu-item">
+                <i class="fas fa-brain"></i>
+                <span>Add Knowledge</span>
+            </a>
+            
+            <div class="menu-category">AFFILIATE</div>
+            <a href="affiliate-management.html" class="menu-item">
+                <i class="fas fa-link"></i>
+                <span>Affiliate Management</span>
+            </a>
+            
+            <div class="menu-category">ACCOUNT</div>
+            <a href="settings.html" class="menu-item">
+                <i class="fas fa-cog"></i>
+                <span>Settings</span>
+            </a>
+        </nav>
+        
+        <div class="sidebar-footer">
+            <div class="user-info">
+                <div class="user-avatar" id="user-avatar">U</div>
+                <div class="user-details">
+                    <div class="user-name" id="user-name">User</div>
+                    <div class="user-role">Influencer</div>
+                </div>
+            </div>
+            <button id="logout-btn" class="logout-btn">Sign Out</button>
+        </div>
+    </aside>
+
+    <!-- Main content area -->
+    <main class="main-content">
+        <div class="header">
+            <h1 class="page-title">Avatar Setup</h1>
+            <a href="#" id="preview-chat-link" class="preview-chat-link">
+                <i class="fas fa-comments"></i> Preview Chat
+            </a>
+        </div>
+
+        <!-- Alert container -->
+        <div id="alert" class="alert"></div>
+
+        <div class="setup-grid">
+            <!-- Avatar Creation Section -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">
+                        <i class="fas fa-camera"></i>
+                        Create Avatar
+                    </h3>
+                </div>
+                
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                    </div>
+                    <h4>Upload Your Photo</h4>
+                    <p>Drag & drop or click to select an image</p>
+                    <small>Best results with clear face photos (JPG, PNG)</small>
+                    <input type="file" id="photoInput" accept="image/*" style="display: none;">
+                </div>
+
+                <div class="loading" id="avatarLoading">
+                    <div class="spinner"></div>
+                    <p>Creating your avatar...</p>
+                </div>
+            </div>
+
+            <!-- Avatar Preview Section -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">
+                        <i class="fas fa-eye"></i>
+                        Avatar Preview
+                    </h3>
+                </div>
+                
+                <div class="avatar-preview" id="avatarPreview">
+                    <div class="placeholder-avatar">
+                        <i class="fas fa-user"></i>
+                    </div>
+                    <div id="avatarStatus">
+                        <span class="status-indicator status-processing">
+                            <i class="fas fa-clock"></i>
+                            Upload photo to create avatar
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Voice Selection Section -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <i class="fas fa-microphone"></i>
+                    Voice Selection
+                </h3>
+                <div class="voice-loading" id="voiceLoading" style="display: none;">
+                    <div class="spinner" style="width: 20px; height: 20px; border-width: 2px;"></div>
+                    <span style="margin-left: 10px; font-size: 0.9rem; color: #64748b;">Loading voices...</span>
+                </div>
+            </div>
+            
+            <div class="voice-selection" id="voiceSelection">
+                <!-- Voice options will be loaded here -->
+            </div>
+
+            <div style="text-align: center; margin-top: 20px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
+                <p style="color: #64748b; margin-bottom: 10px;">Want to create your own voice?</p>
+                <a href="voice-setup.html" class="btn btn-secondary">
+                    <i class="fas fa-microphone-alt"></i> Create Custom Voice
+                </a>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // ENHANCED AVATAR SETUP WITH AUTOMATIC LOADING AND VOICE INTEGRATION
+        
+        // Global variables
+        let avatarData = {
+            avatarId: null,
+            avatarUrl: null,
+            selectedVoice: '2d5b0e6cf36f460aa7fc47e3eee4ba54', // Default voice
+            isReady: false,
+            isNewlyCreated: false
+        };
+
+        let availableVoices = {
+            all: [],
+            loaded: false
+        };
+
+        let userProfile = null;
+
+        // Configuration
+        const API_BASE_URL = 'http://localhost:2000/api';
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🎭 Initializing Enhanced Avatar Setup page...');
+            
+            // Initialize authentication first
+            if (!initializeAuth()) {
+                return;
+            }
+            
+            // Setup event listeners
+            setupEventListeners();
+            
+            // Load user profile and existing avatar
+            loadUserProfile();
+        });
+
+        // ENHANCED AUTHENTICATION
+        function initializeAuth() {
+            console.log('🔐 Checking authentication...');
+            
+            const token = localStorage.getItem('token');
+            const userStr = localStorage.getItem('user');
+            
+            if (!token || !userStr) {
+                console.error('❌ No authentication found');
+                window.location.href = './login.html';
+                return false;
+            }
+            
+            try {
+                const userData = JSON.parse(userStr);
+                let user;
+                
+                if (userData.user && userData.user.username) {
+                    user = { ...userData.user, userType: userData.userType || 'influencer' };
+                } else if (userData.username) {
+                    user = userData;
+                } else {
+                    throw new Error('Invalid user data structure');
+                }
+                
+                if (!user.username) {
+                    throw new Error('No username found');
+                }
+                
+                // Update UI with user info
+                updateUIWithUserInfo(user);
+                
+                console.log('✅ Authentication successful for user:', user.username);
+                return true;
+                
+            } catch (error) {
+                console.error('❌ Error parsing user data:', error);
+                window.location.href = './login.html';
+                return false;
+            }
+        }
+
+        function updateUIWithUserInfo(user) {
+            // Update user name and avatar
+            const userNameElement = document.getElementById('user-name');
+            const userAvatarElement = document.getElementById('user-avatar');
+            const previewChatLink = document.getElementById('preview-chat-link');
+            
+            if (userNameElement) {
+                userNameElement.textContent = user.username || 'User';
+            }
+            
+            if (userAvatarElement && user.username) {
+                const initials = user.username.substring(0, 2).toUpperCase();
+                userAvatarElement.textContent = initials;
+            }
+            
+            if (previewChatLink) {
+                const chatUrl = `${window.location.origin}/chat.html?username=${encodeURIComponent(user.username)}`;
+                previewChatLink.href = chatUrl;
+            }
+        }
+
+        // ENHANCED: Load complete user profile with avatar and voice data
+        async function loadUserProfile() {
+            try {
+                console.log('👤 Loading user profile with avatar and voice data...');
+                showAlert('Loading your profile and avatar...', 'info');
+                
+                const token = localStorage.getItem('token');
+                const response = await fetch(`${API_BASE_URL}/influencer/profile`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: Failed to fetch profile`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.status === 'success' && data.data) {
+                    userProfile = data.data;
+                    console.log('✅ Profile loaded:', {
+                        username: userProfile.username,
+                        has_avatar: userProfile.has_avatar,
+                        avatar_id: userProfile.avatar_id,
+                        voice_id: userProfile.preferred_voice_id
+                    });
+                    
+                    // Set avatar data if exists
+                    if (userProfile.avatar_id) {
+                        avatarData.avatarId = userProfile.avatar_id;
+                        avatarData.isReady = userProfile.has_avatar;
+                        console.log('📋 Found existing avatar:', avatarData.avatarId);
+                    }
+                    
+                    // Set voice preference
+                    if (userProfile.preferred_voice_id) {
+                        avatarData.selectedVoice = userProfile.preferred_voice_id;
+                        console.log('🎤 Found voice preference:', avatarData.selectedVoice);
+                    }
+                    
+                    // Load voices first, then display avatar
+                    await loadVoicesFromAPI();
+                    
+                    // Display existing avatar or upload area
+                    if (avatarData.avatarId && avatarData.isReady) {
+                        await displayExistingAvatar();
+                    } else {
+                        showUploadArea();
+                    }
+                    
+                } else {
+                    throw new Error(data.message || 'Failed to load profile');
+                }
+                
+            } catch (error) {
+                console.error('❌ Error loading user profile:', error);
+                showAlert(`Failed to load profile: ${error.message}`, 'error');
+                // Still show upload area and load voices
+                showUploadArea();
+                await loadVoicesFromAPI();
+            }
+        }
+
+        // ENHANCED: Display existing avatar with proper preview
+        async function displayExistingAvatar() {
+            try {
+                console.log('🎭 Displaying existing avatar...');
+                
+                // Validate avatar still exists on HeyGen
+                const isValid = await validateAvatarExists(avatarData.avatarId);
+                
+                if (isValid) {
+                    // Display avatar info
+                    displayAvatarInfo({
+                        avatar_id: avatarData.avatarId,
+                        type: userProfile.avatar_type || 'talking_photo',
+                        status: 'ready'
+                    });
+                    
+                    showAlert(`Avatar loaded! Selected voice: ${getVoiceName(avatarData.selectedVoice)}`, 'success');
+                    
+                    // Auto-generate test video after a brief delay
+                    setTimeout(() => {
+                        if (avatarData.avatarId && avatarData.selectedVoice) {
+                            generateTestVideoAuto();
+                        }
+                    }, 2000);
+                    
+                } else {
+                    // Avatar no longer exists
+                    console.log('❌ Avatar no longer exists on HeyGen');
+                    showAvatarNotFound();
+                    showAlert('Your previous avatar is no longer available. Please create a new one.', 'warning');
+                    
+                    // Clear invalid avatar from database
+                    await clearInvalidAvatar();
+                }
+                
+            } catch (error) {
+                console.error('❌ Error displaying existing avatar:', error);
+                showUploadArea();
+                showAlert('Error loading existing avatar. Please create a new one.', 'warning');
+            }
+        }
+
+        // NEW: Validate if avatar still exists on HeyGen servers
+        async function validateAvatarExists(avatarId) {
+            try {
+                const token = localStorage.getItem('token');
+                
+                // Test avatar by attempting a quick validation call
+                const response = await fetch(`${API_BASE_URL}/avatar/test-video`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        avatar_id: avatarId,
+                        text: 'validation test',
+                        voice_id: avatarData.selectedVoice,
+                        validate_only: true
+                    })
+                });
+                
+                if (response.status === 404) {
+                    const errorData = await response.json();
+                    if (errorData.error_type === 'avatar_not_found') {
+                        return false;
+                    }
+                }
+                
+                return response.ok || response.status === 202; // Accept "processing" status as valid
+                
+            } catch (error) {
+                console.warn('⚠️ Avatar validation failed:', error);
+                return true; // Assume valid if we can't verify
+            }
+        }
+
+        // NEW: Clear invalid avatar from database
+        async function clearInvalidAvatar() {
+            try {
+                const token = localStorage.getItem('token');
+                
+                await fetch(`${API_BASE_URL}/influencer/profile`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        heygen_avatar_id: null,
+                        avatar_training_status: 'none',
+                        avatar_type: 'none'
+                    })
+                });
+                
+                // Update local data
+                avatarData.avatarId = null;
+                avatarData.isReady = false;
+                
+                console.log('🗑️ Cleared invalid avatar from database');
+                
+            } catch (error) {
+                console.error('❌ Error clearing invalid avatar:', error);
+            }
+        }
+
+        // ENHANCED: Display avatar information
+        function displayAvatarInfo(avatarInfo) {
+            const preview = document.getElementById('avatarPreview');
+            const uploadArea = document.getElementById('uploadArea');
+            
+            if (preview) {
+                preview.innerHTML = `
+                    <div class="placeholder-avatar" style="background: linear-gradient(135deg, #6366f1, #8b5cf6);">
+                        <i class="fas fa-user-astronaut" style="color: white;"></i>
+                    </div>
+                    <p style="margin-top: 15px; color: #64748b; font-weight: 600;">Your Custom Avatar</p>
+                    <p style="color: #5e60ce; font-size: 0.9rem;">✨ Ready for chat and video!</p>
+                    <p style="color: #64748b; font-size: 0.8rem; margin-top: 5px;">Avatar ID: ${avatarInfo.avatar_id}</p>
+                    <p style="color: #10b981; font-size: 0.8rem;">Type: ${avatarInfo.type || 'Custom Talking Photo'}</p>
+                    <div class="video-controls">
+                        <button onclick="generateTestVideoWithCurrentVoice()" class="btn btn-secondary btn-small">
+                            <i class="fas fa-video"></i> Generate Test Video
+                        </button>
+                    </div>
+                `;
+            }
+
+            // Update status
+            const status = document.getElementById('avatarStatus');
+            if (status) {
+                status.innerHTML = `
+                    <span class="status-indicator status-ready">
+                        <i class="fas fa-check-circle"></i>
+                        Avatar ready for chat
+                    </span>
+                `;
+            }
+
+            // Show replace option
+            if (uploadArea) {
+                uploadArea.innerHTML = `
+                    <div class="upload-icon" style="color: #5e60ce;">
+                        <i class="fas fa-sync-alt"></i>
+                    </div>
+                    <h4 style="color: #1e293b;">Replace Avatar</h4>
+                    <p style="color: #64748b;">Upload a new photo to replace your current avatar</p>
+                    <small style="color: #94a3b8;">Best results with clear face photos (JPG, PNG)</small>
+                    <input type="file" id="photoInput" accept="image/*" style="display: none;">
+                `;
+                setupAvatarUploadListeners();
+            }
+        }
+
+        function showAvatarNotFound() {
+            const preview = document.getElementById('avatarPreview');
+            if (preview) {
+                preview.innerHTML = `
+                    <div class="placeholder-avatar" style="background: linear-gradient(135deg, #fee2e2, #fecaca);">
+                        <i class="fas fa-exclamation-triangle" style="color: #ef4444;"></i>
+                    </div>
+                    <p style="margin-top: 15px; color: #ef4444; font-weight: 600;">Avatar No Longer Available</p>
+                    <p style="color: #64748b; font-size: 0.9rem; margin-top: 8px;">Your avatar was removed from HeyGen servers.</p>
+                    <p style="color: #64748b; font-size: 0.9rem;">Please upload a new photo to create a fresh avatar.</p>
+                    <div class="video-controls" style="margin-top: 15px;">
+                        <button onclick="document.getElementById('uploadArea').scrollIntoView({behavior: 'smooth'})" class="btn btn-small">
+                            <i class="fas fa-upload"></i> Create New Avatar
+                        </button>
+                    </div>
+                `;
+            }
+            
+            avatarData.avatarId = null;
+            avatarData.isReady = false;
+            showUploadArea();
+        }
+
+        function setupEventListeners() {
+            console.log('🎯 Setting up event listeners...');
+            
+            // Avatar upload listeners
+            setupAvatarUploadListeners();
+            
+            // Logout button
+            const logoutBtn = document.getElementById('logout-btn');
+            if (logoutBtn) {
+                logoutBtn.addEventListener('click', function() {
+                    if (confirm('Are you sure you want to log out?')) {
+                        localStorage.removeItem('token');
+                        localStorage.removeItem('user');
+                        window.location.href = './login.html';
+                    }
+                });
+            }
+        }
+
+        function setupAvatarUploadListeners() {
+            const uploadArea = document.getElementById('uploadArea');
+            const photoInput = uploadArea ? uploadArea.querySelector('#photoInput') : null;
+
+            if (!uploadArea || !photoInput) return;
+
+            // Remove existing listeners by cloning elements
+            const newUploadArea = uploadArea.cloneNode(true);
+            const newPhotoInput = newUploadArea.querySelector('#photoInput');
+            
+            uploadArea.parentNode.replaceChild(newUploadArea, uploadArea);
+
+            // Add fresh event listeners
+            newUploadArea.addEventListener('click', () => newPhotoInput.click());
+            newUploadArea.addEventListener('dragover', handleDragOver);
+            newUploadArea.addEventListener('drop', handleDrop);
+            newPhotoInput.addEventListener('change', handleFileSelect);
+
+            console.log('✅ Avatar upload listeners setup complete');
+        }
+
+        // AVATAR UPLOAD HANDLERS
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('dragover');
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                processFile(files[0]);
+            }
+        }
+
+        function handleFileSelect(e) {
+            const file = e.target.files[0];
+            if (file) {
+                processFile(file);
+            }
+        }
+
+        function processFile(file) {
+            console.log('📷 Processing uploaded file:', file.name, 'Size:', file.size);
+
+            // Validate file type
+            if (!file.type.startsWith('image/')) {
+                showAlert('Please select an image file (JPG, PNG, WebP)', 'error');
+                return;
+            }
+
+            const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+            if (!allowedTypes.includes(file.type)) {
+                showAlert('Invalid file type. Please select a JPEG, PNG, or WebP image.', 'error');
+                return;
+            }
+
+            // Validate file size
+            const maxSize = 10 * 1024 * 1024; // 10MB
+            if (file.size > maxSize) {
+                showAlert(`File too large. Maximum size is ${formatFileSize(maxSize)}.`, 'error');
+                return;
+            }
+
+            if (file.size === 0) {
+                showAlert('File is empty. Please select a valid image.', 'error');
+                return;
+            }
+
+            // Show loading and hide upload area
+            const loadingElement = document.getElementById('avatarLoading');
+            const uploadArea = document.getElementById('uploadArea');
+            
+            if (loadingElement) loadingElement.classList.add('active');
+            if (uploadArea) uploadArea.style.display = 'none';
+
+            // Start avatar creation
+            createAvatar(file);
+        }
+
+        // ENHANCED AVATAR CREATION
+        async function createAvatar(file) {
+            try {
+                console.log('🎭 Creating avatar with file:', file.name);
+
+                const token = localStorage.getItem('token');
+                const formData = new FormData();
+                formData.append('file', file);
+
+                showAlert('Creating your custom avatar... This may take a few moments.', 'info');
+
+                const response = await fetch(`${API_BASE_URL}/avatar/create`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.status === 'success') {
+                    avatarData.avatarId = data.data.avatar_id;
+                    avatarData.isReady = true;
+                    avatarData.isNewlyCreated = true;
+
+                    showAlert('✅ Custom avatar created from your photo!', 'success');
+                    
+                    // Display avatar with new flag
+                    displayAvatarInfo({
+                        ...data.data,
+                        is_new: true
+                    });
+                    
+                } else {
+                    throw new Error(data.message || 'Failed to create avatar');
+                }
+
+            } catch (error) {
+                console.error('❌ Avatar creation failed:', error);
+                showAlert(`Failed to create avatar: ${error.message}`, 'error');
+                showUploadArea();
+            } finally {
+                const loadingElement = document.getElementById('avatarLoading');
+                if (loadingElement) loadingElement.classList.remove('active');
+            }
+        }
+
+        function showUploadArea() {
+            const uploadArea = document.getElementById('uploadArea');
+            if (uploadArea) {
+                uploadArea.style.display = 'flex';
+                setupAvatarUploadListeners();
+            }
+        }
+
+        // ENHANCED VOICE LOADING WITH AUTOMATIC SELECTION
+        async function loadVoicesFromAPI() {
+            console.log('🎤 Loading voices from API...');
+            const voiceLoading = document.getElementById('voiceLoading');
+            if (voiceLoading) voiceLoading.style.display = 'flex';
+            
+            try {
+                // Load available voices
+                const response = await fetch(`${API_BASE_URL}/avatar/list-voices`);
+                const data = await response.json();
+                
+                if (data.status === 'success' && data.data && data.data.voices) {
+                    availableVoices.all = data.data.voices;
+                    console.log(`✅ Loaded ${data.data.voices.length} voices from API`);
+                } else {
+                    console.warn('⚠️ API returned no voice data, using fallbacks');
+                    loadFallbackVoices();
+                }
+                
+                // Load user's custom voice if exists
+                await loadCustomUserVoice();
+                
+                availableVoices.loaded = true;
+                renderVoiceOptions();
+                
+                // ENHANCED: Select user's preferred voice or default
+                const voiceToSelect = avatarData.selectedVoice || availableVoices.all[0]?.voice_id;
+                if (voiceToSelect) {
+                    selectVoice(voiceToSelect);
+                }
+                
+            } catch (error) {
+                console.error('❌ Failed to load voices from API:', error);
+                showAlert('Unable to load voices from server. Using defaults.', 'warning');
+                loadFallbackVoices();
+                availableVoices.loaded = true;
+                renderVoiceOptions();
+            } finally {
+                if (voiceLoading) voiceLoading.style.display = 'none';
+            }
+        }
+
+        // Load user's custom voice
+        async function loadCustomUserVoice() {
+            try {
+                if (userProfile && userProfile.voice_id && userProfile.voice_id.startsWith('custom_')) {
+                    console.log('🔍 Found custom voice:', userProfile.voice_id);
+                    
+                    const customVoice = {
+                        voice_id: userProfile.voice_id,
+                        name: `${userProfile.username}'s Voice (Custom)`,
+                        gender: 'Custom',
+                        language: 'English',
+                        style: 'Personal',
+                        description: 'Your personalized voice clone',
+                        is_custom: true
+                    };
+                    
+                    // Add at the beginning of the list
+                    availableVoices.all.unshift(customVoice);
+                    console.log('✅ Added custom voice to voice list');
+                }
+                
+            } catch (error) {
+                console.warn('⚠️ Error loading custom user voice:', error);
+            }
+        }
+
+        function loadFallbackVoices() {
+            console.log('📢 Loading fallback voices...');
+            
+            availableVoices.all = [
+                {
+                    voice_id: "2d5b0e6cf36f460aa7fc47e3eee4ba54",
+                    name: "Rachel (Professional)",
+                    gender: "Female",
+                    language: "English",
+                    style: "Professional",
+                    description: "Clear, professional female voice perfect for business content"
+                },
+                {
+                    voice_id: "d7bbcdd6964c47bdaae26decade4a933",
+                    name: "David (Professional)",
+                    gender: "Male", 
+                    language: "English",
+                    style: "Professional",
+                    description: "Authoritative male voice ideal for educational content"
+                },
+                {
+                    voice_id: "4d2b8e6cf36f460aa7fc47e3eee4ba12",
+                    name: "Emma (Friendly)",
+                    gender: "Female",
+                    language: "English", 
+                    style: "Friendly",
+                    description: "Warm, approachable female voice great for lifestyle content"
+                }
+            ];
+        }
+
+        function renderVoiceOptions() {
+            const voiceContainer = document.getElementById('voiceSelection');
+            const voiceList = availableVoices.all;
+            
+            if (!voiceList || voiceList.length === 0) {
+                voiceContainer.innerHTML = `
+                    <div style="text-align: center; padding: 40px; color: #64748b;">
+                        <i class="fas fa-exclamation-triangle" style="font-size: 2rem; margin-bottom: 15px;"></i>
+                        <p>No voices available. Please check your connection and refresh the page.</p>
+                        <button onclick="loadVoicesFromAPI()" class="btn" style="margin-top: 15px;">
+                            <i class="fas fa-redo"></i> Retry Loading Voices
+                        </button>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Separate custom and default voices
+            const customVoices = voiceList.filter(v => v.is_custom);
+            const defaultVoices = voiceList.filter(v => !v.is_custom);
+            
+            let voiceHTML = '';
+            
+            // Add custom voices section if user has any
+            if (customVoices.length > 0) {
+                voiceHTML += `
+                    <div class="voice-category">
+                        <h4 class="category-title">
+                            <i class="fas fa-user-circle"></i> Your Custom Voice
+                        </h4>
+                        <div class="voice-grid">
+                            ${customVoices.map(voice => `
+                                <div class="voice-option" data-voice="${voice.voice_id}">
+                                    <input type="radio" name="voice" value="${voice.voice_id}">
+                                    <div class="voice-info">
+                                        <div class="voice-name">${voice.name}</div>
+                                        <div class="voice-details">${voice.language} • ${voice.gender} • ${voice.style}</div>
+                                        <div class="voice-details" style="margin-top: 4px; font-style: italic;">${voice.description}</div>
+                                    </div>
+                                    <button class="voice-preview-btn" onclick="playVoicePreview('${voice.voice_id}', '${encodeURIComponent(voice.name)}')">
+                                        <i class="fas fa-play"></i> Preview
+                                    </button>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Add default voices section
+            if (defaultVoices.length > 0) {
+                voiceHTML += `
+                    <div class="voice-category">
+                        <h4 class="category-title">
+                            <i class="fas fa-microphone"></i> Pre-made Voices (${defaultVoices.length} Options)
+                        </h4>
+                        <div class="voice-grid">
+                            ${defaultVoices.map(voice => `
+                                <div class="voice-option" data-voice="${voice.voice_id}">
+                                    <input type="radio" name="voice" value="${voice.voice_id}">
+                                    <div class="voice-info">
+                                        <div class="voice-name">${voice.name}</div>
+                                        <div class="voice-details">${voice.language} • ${voice.gender} • ${voice.style}</div>
+                                        <div class="voice-details" style="margin-top: 4px; font-style: italic;">${voice.description}</div>
+                                    </div>
+                                    <button class="voice-preview-btn" onclick="playVoicePreview('${voice.voice_id}', '${encodeURIComponent(voice.name)}')">
+                                        <i class="fas fa-play"></i> Preview
+                                    </button>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            voiceContainer.innerHTML = `
+                <div class="voice-categories">
+                    ${voiceHTML}
+                </div>
+            `;
+            
+            setupVoiceEventListeners();
+            console.log(`✅ Rendered ${voiceList.length} voice options`);
+        }
+
+        function setupVoiceEventListeners() {
+            document.querySelectorAll('.voice-option').forEach(option => {
+                option.addEventListener('click', function() {
+                    const voiceId = this.dataset.voice;
+                    console.log('🎤 Voice option clicked:', voiceId);
+                    selectVoice(voiceId);
+                });
+            });
+        }
+
+        // ENHANCED: Voice selection with automatic video regeneration
+        function selectVoice(voiceId) {
+            console.log('🎤 Selecting voice:', voiceId);
+            
+            // Update UI
+            document.querySelectorAll('.voice-option').forEach(option => {
+                option.classList.remove('selected');
+                const radio = option.querySelector('input[type="radio"]');
+                if (radio) radio.checked = false;
+            });
+            
+            const selectedOption = document.querySelector(`[data-voice="${voiceId}"]`);
+            if (selectedOption) {
+                selectedOption.classList.add('selected');
+                const radio = selectedOption.querySelector('input[type="radio"]');
+                if (radio) radio.checked = true;
+            }
+            
+            // Update state
+            const previousVoice = avatarData.selectedVoice;
+            avatarData.selectedVoice = voiceId;
+            localStorage.setItem('selectedVoice', voiceId);
+            
+            // Save preference to backend
+            saveVoicePreference(voiceId);
+            
+            const voiceName = getVoiceName(voiceId);
+            showAlert(`Voice changed to ${voiceName}`, 'success');
+            
+            // ENHANCED: Auto-regenerate video if avatar exists and voice changed
+            if (previousVoice !== voiceId && avatarData.avatarId && avatarData.isReady) {
+                console.log('🔄 Voice changed - regenerating video with new voice');
+                showAlert(`Generating new video with ${voiceName}...`, 'info');
+                
+                setTimeout(() => {
+                    generateTestVideoWithCurrentVoice();
+                }, 1500);
+            }
+        }
+
+        // NEW: Generate test video with current voice selection
+        async function generateTestVideoWithCurrentVoice() {
+            if (!avatarData.avatarId) {
+                showAlert('No avatar available for test video', 'error');
+                return;
+            }
+            
+            try {
+                const token = localStorage.getItem('token');
+                
+                // Update preview to show generating state
+                const preview = document.getElementById('avatarPreview');
+                if (preview) {
+                    const videoControls = preview.querySelector('.video-controls');
+                    if (videoControls) {
+                        videoControls.innerHTML = `
+                            <button class="btn btn-secondary btn-small" disabled>
+                                <i class="fas fa-spinner fa-spin"></i> Generating with ${getVoiceName(avatarData.selectedVoice)}...
+                            </button>
+                        `;
+                    }
+                }
+                
+                console.log('🎬 Generating test video with current voice...');
+                console.log('Avatar ID:', avatarData.avatarId);
+                console.log('Voice ID:', avatarData.selectedVoice);
+                
+                const response = await fetch(`${API_BASE_URL}/avatar/test-video`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        avatar_id: avatarData.avatarId,
+                        text: `Hello! This is a test of my AI avatar with my ${getVoiceName(avatarData.selectedVoice)} voice. How does it look and sound?`,
+                        voice_id: avatarData.selectedVoice,
+                        is_newly_created: avatarData.isNewlyCreated
+                    })
+                });
+                
+                const data = await response.json();
+                console.log('📡 Video response:', data);
+                
+                if (response.ok && data.status === 'success') {
+                    if (data.data.video_id) {
+                        // Start polling for video completion
+                        pollVideoStatus(data.data.video_id, data.data.estimated_time || 30);
+                    } else {
+                        throw new Error('No video ID returned');
+                    }
+                } else {
+                    // Handle specific error types
+                    if (data.error_type === 'avatar_processing') {
+                        showAvatarProcessingWithCountdown(data.retry_delay || 60, avatarData.isNewlyCreated);
+                    } else if (data.error_type === 'avatar_not_found') {
+                        showAvatarNotFound();
+                        showAlert('Avatar not found. Please create a new one.', 'error');
+                    } else {
+                        throw new Error(data.message || 'Failed to generate test video');
+                    }
+                }
+                
+            } catch (error) {
+                console.error('❌ Video generation error:', error);
+                showAlert(`Video generation failed: ${error.message}`, 'error');
+                resetVideoControls();
+            }
+        }
+
+        // Alias for backward compatibility
+        function generateTestVideoAuto() {
+            generateTestVideoWithCurrentVoice();
+        }
+
+        function showAvatarProcessingWithCountdown(retryDelay = 60, isNewlyCreated = false) {
+            const preview = document.getElementById('avatarPreview');
+            if (!preview) return;
+            
+            const videoControls = preview.querySelector('.video-controls');
+            if (!videoControls) return;
+            
+            let countdown = retryDelay;
+            
+            function updateCountdown() {
+                const minutes = Math.floor(countdown / 60);
+                const seconds = countdown % 60;
+                const timeString = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+                
+                videoControls.innerHTML = `
+                    <div style="text-align: center;">
+                        <p style="color: #f59e0b; font-size: 0.9rem; margin-bottom: 10px;">
+                            <i class="fas fa-clock"></i> ${isNewlyCreated ? 'New avatar processing' : 'Avatar not ready'}
+                        </p>
+                        <p style="color: #64748b; font-size: 0.8rem; margin-bottom: 15px;">
+                            Auto-retry in ${timeString}
+                        </p>
+                        <button onclick="retryVideoGeneration()" class="btn btn-secondary btn-small">
+                            <i class="fas fa-redo"></i> Retry Now
+                        </button>
+                    </div>
+                `;
+                
+                countdown--;
+                
+                if (countdown < 0) {
+                    console.log('⏰ Auto-retrying video generation...');
+                    retryVideoGeneration();
+                }
+            }
+            
+            updateCountdown();
+            const countdownInterval = setInterval(() => {
+                if (countdown >= 0) {
+                    updateCountdown();
+                } else {
+                    clearInterval(countdownInterval);
+                }
+            }, 1000);
+        }
+
+        function retryVideoGeneration() {
+            if (avatarData.avatarId) {
+                showAlert('Retrying video generation...', 'info');
+                avatarData.isNewlyCreated = false; // No longer newly created after first retry
+                generateTestVideoWithCurrentVoice();
+            } else {
+                showAlert('No avatar available. Please create a new avatar first.', 'error');
+            }
+        }
+
+        // ENHANCED: Save voice preference with proper error handling
+        async function saveVoicePreference(voiceId) {
+            try {
+                const token = localStorage.getItem('token');
+                const response = await fetch(`${API_BASE_URL}/voice/preference`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        voice_id: voiceId
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.status === 'success') {
+                    console.log('✅ Voice preference saved to backend');
+                    
+                    // Update user profile in localStorage
+                    const userStr = localStorage.getItem('user');
+                    if (userStr) {
+                        try {
+                            const userData = JSON.parse(userStr);
+                            if (userData.user) {
+                                userData.user.preferred_voice_id = voiceId;
+                            } else {
+                                userData.preferred_voice_id = voiceId;
+                            }
+                            localStorage.setItem('user', JSON.stringify(userData));
+                        } catch (e) {
+                            console.warn('Could not update localStorage user data');
+                        }
+                    }
+                } else {
+                    throw new Error(data.message || 'Failed to save voice preference');
+                }
+                
+            } catch (error) {
+                console.warn('⚠️ Failed to save voice preference to backend:', error);
+            }
+        }
+
+        function playVoicePreview(voiceId, encodedVoiceName) {
+            const voiceName = decodeURIComponent(encodedVoiceName);
+            console.log('🔊 Playing voice preview for:', voiceName);
+            
+            const previewTexts = {
+                '2d5b0e6cf36f460aa7fc47e3eee4ba54': "Hello! I'm Rachel, your professional AI assistant. I'm excited to help your audience!",
+                'd7bbcdd6964c47bdaae26decade4a933': "Hey there! I'm David, ready to provide expert recommendations.",
+                'default': `Hi! I'm ${voiceName}, ready to help your audience with personalized recommendations!`
+            };
+
+            const text = previewTexts[voiceId] || previewTexts['default'];
+
+            if ('speechSynthesis' in window) {
+                // Stop any current speech
+                speechSynthesis.cancel();
+                
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 0.9;
+                utterance.pitch = voiceId.includes('male') || voiceId === 'd7bbcdd6964c47bdaae26decade4a933' ? 0.8 : 1.1;
+                utterance.volume = 0.8;
+                
+                speechSynthesis.speak(utterance);
+                
+                showAlert(`Playing preview of ${voiceName}`, 'info');
+            } else {
+                showAlert('Speech synthesis not supported in this browser', 'error');
+            }
+        }
+
+        function getVoiceName(voiceId) {
+            const voice = availableVoices.all.find(v => v.voice_id === voiceId);
+            return voice ? voice.name : 'Selected Voice';
+        }
+
+        // VIDEO STATUS POLLING
+        async function pollVideoStatus(videoId, estimatedTime = 30) {
+            const maxAttempts = Math.max(20, Math.ceil(estimatedTime / 3));
+            let attempts = 0;
+            
+            console.log(`📹 Polling video status for: ${videoId}`);
+            
+            const checkStatus = async () => {
+                try {
+                    attempts++;
+                    console.log(`📊 Checking video status (attempt ${attempts}/${maxAttempts})...`);
+                    
+                    const token = localStorage.getItem('token');
+                    const response = await fetch(`${API_BASE_URL}/avatar/video-status/${videoId}`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (response.ok && data.status === 'success') {
+                        const videoStatus = data.data.status;
+                        const progress = data.data.progress || 50;
+                        const videoUrl = data.data.video_url;
+                        
+                        updateVideoProgress(progress, videoStatus);
+                        
+                        if (videoStatus === 'completed' && videoUrl) {
+                            console.log('✅ Video generation completed!');
+                            displayTestVideo(videoUrl);
+                            return;
+                        } else if (videoStatus === 'failed') {
+                            throw new Error(data.data.error || 'Video generation failed');
+                        }
+                        
+                        // Continue polling if still processing
+                        if (attempts < maxAttempts) {
+                            const delay = attempts < 5 ? 3000 : 5000;
+                            setTimeout(checkStatus, delay);
+                        } else {
+                            throw new Error('Video generation timed out');
+                        }
+                    } else {
+                        throw new Error(data.message || 'Status check failed');
+                    }
+                    
+                } catch (error) {
+                    console.error('❌ Video status check error:', error);
+                    if (attempts < maxAttempts) {
+                        setTimeout(checkStatus, 5000);
+                    } else {
+                        showAlert(`Video generation failed: ${error.message}`, 'error');
+                        resetVideoControls();
+                    }
+                }
+            };
+            
+            checkStatus();
+        }
+
+        function updateVideoProgress(progress, status = 'processing') {
+            const preview = document.getElementById('avatarPreview');
+            if (preview) {
+                const videoControls = preview.querySelector('.video-controls');
+                if (videoControls) {
+                    let statusText = 'Generating...';
+                    
+                    switch (status) {
+                        case 'processing': statusText = 'Creating your video...'; break;
+                        case 'pending': statusText = 'Preparing...'; break;
+                        case 'queued': statusText = 'In queue...'; break;
+                    }
+                    
+                    videoControls.innerHTML = `
+                        <button class="btn btn-secondary btn-small" disabled>
+                            <i class="fas fa-spinner fa-spin"></i> ${statusText} ${progress}%
+                        </button>
+                        <p style="font-size: 0.8rem; color: #64748b; margin-top: 8px;">
+                            Voice: ${getVoiceName(avatarData.selectedVoice)}
+                        </p>
+                    `;
+                }
+            }
+        }
+
+        function resetVideoControls() {
+            const preview = document.getElementById('avatarPreview');
+            if (preview) {
+                const videoControls = preview.querySelector('.video-controls');
+                if (videoControls) {
+                    videoControls.innerHTML = `
+                        <button onclick="generateTestVideoWithCurrentVoice()" class="btn btn-secondary btn-small">
+                            <i class="fas fa-video"></i> Generate Test Video
+                        </button>
+                    `;
+                }
+            }
+        }
+
+        function displayTestVideo(videoUrl) {
+            console.log('🎬 Displaying test video:', videoUrl);
+            
+            const preview = document.getElementById('avatarPreview');
+            if (preview) {
+                preview.innerHTML = `
+                    <video class="avatar-video" controls autoplay style="max-width: 100%; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.2);">
+                        <source src="${videoUrl}" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                    <p style="margin-top: 15px; color: #64748b; font-weight: 600;">Preview with ${getVoiceName(avatarData.selectedVoice)}</p>
+                    <p style="color: #5e60ce; font-size: 0.9rem;">✨ Your custom avatar with selected voice!</p>
+                    <div class="video-controls">
+                        <button onclick="generateTestVideoWithCurrentVoice()" class="btn btn-secondary btn-small">
+                            <i class="fas fa-redo"></i> Regenerate Video
+                        </button>
+                        <a href="${videoUrl}" download="avatar-preview.mp4" class="btn btn-small">
+                            <i class="fas fa-download"></i> Download
+                        </a>
+                        <button onclick="shareTestVideo('${videoUrl}')" class="btn btn-small">
+                            <i class="fas fa-share"></i> Share
+                        </button>
+                    </div>
+                `;
+            }
+            
+            // Mark as no longer newly created after first successful video
+            avatarData.isNewlyCreated = false;
+            
+            showAlert('✅ Video generated successfully! Voice changes will auto-regenerate.', 'success');
+        }
+
+        function shareTestVideo(videoUrl) {
+            if (navigator.share) {
+                navigator.share({
+                    title: 'My AI Avatar Test Video',
+                    text: 'Check out my AI avatar!',
+                    url: videoUrl
+                }).catch(err => console.log('Error sharing:', err));
+            } else {
+                navigator.clipboard.writeText(videoUrl).then(() => {
+                    showAlert('Video URL copied to clipboard!', 'success');
+                }).catch(() => {
+                    showAlert('Could not copy URL. Please copy it manually.', 'warning');
+                });
+            }
+        }
+
+        // UTILITY FUNCTIONS
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function showAlert(message, type = 'info', duration = 5000) {
+            const alertElement = document.getElementById('alert');
+            
+            if (alertElement) {
+                alertElement.className = `alert ${type}`;
+                alertElement.textContent = message;
+                alertElement.style.display = 'block';
+                
+                // Auto-hide alert (except for errors)
+                if (type !== 'error') {
+                    setTimeout(() => {
+                        if (alertElement.style.display !== 'none') {
+                            alertElement.style.display = 'none';
+                        }
+                    }, duration);
+                }
+                
+                // Scroll to top to show alert
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+            
+            console.log(`📢 Alert [${type.toUpperCase()}]: ${message}`);
+        }
+
+        console.log('🎭 Enhanced Avatar Setup with Auto-Loading and Voice Integration loaded');
+    </script>
+</body>
+</html>

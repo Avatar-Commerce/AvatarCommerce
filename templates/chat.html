@@ -1,0 +1,1863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat - AvatarCommerce</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: 
+                radial-gradient(circle at 20% 50%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 40% 80%, rgba(120, 119, 198, 0.2) 0%, transparent 50%);
+            animation: float 20s ease-in-out infinite;
+            pointer-events: none;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            50% { transform: translateY(-20px) rotate(180deg); }
+        }
+        
+        .chat-container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            box-shadow: 
+                0 25px 50px rgba(0, 0, 0, 0.25),
+                0 0 0 1px rgba(255, 255, 255, 0.2);
+            width: 100%;
+            max-width: 450px;
+            height: 750px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+            animation: slideUp 0.6s ease-out;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px) scale(0.95);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+        
+        .chat-header {
+            background: linear-gradient(135deg, #5e60ce 0%, #7c3aed 100%);
+            color: white;
+            padding: 30px 25px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .chat-header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 120px;
+            height: 120px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            transform: translate(40%, -40%);
+        }
+        
+        .avatar-info {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            position: relative;
+            z-index: 2;
+        }
+        
+        .avatar-container {
+            position: relative;
+        }
+        
+        /* ENHANCED: Avatar display with custom avatar support */
+        .avatar-icon {
+            width: 80px;
+            height: 80px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        .avatar-icon.custom-avatar {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            box-shadow: 0 0 30px rgba(99, 102, 241, 0.4);
+        }
+
+        .avatar-icon.default-avatar {
+            background: linear-gradient(135deg, #64748b 0%, #475569 100%);
+        }
+
+        .avatar-icon:hover {
+            transform: scale(1.05);
+            border-color: rgba(255, 255, 255, 0.6);
+        }
+
+        .avatar-icon::after {
+            content: '';
+            position: absolute;
+            top: -3px;
+            right: -3px;
+            width: 20px;
+            height: 20px;
+            background: #10b981;
+            border-radius: 50%;
+            border: 3px solid white;
+            animation: pulse 2s infinite;
+        }
+
+        .custom-avatar-indicator {
+            position: absolute;
+            bottom: -8px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border: 2px solid white;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.15); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        
+        .user-details {
+            flex: 1;
+        }
+        
+        .username {
+            font-size: 1.6rem;
+            font-weight: 700;
+            margin-bottom: 6px;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+        }
+        
+        .status {
+            font-size: 1rem;
+            opacity: 0.9;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .knowledge-indicator {
+            font-size: 0.85rem;
+            opacity: 0.8;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 4px;
+        }
+
+        .capabilities-indicator {
+            font-size: 0.8rem;
+            opacity: 0.7;
+            margin-top: 4px;
+            display: flex;
+            gap: 12px;
+        }
+
+        .capability-badge {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .voice-controls {
+            display: flex;
+            gap: 10px;
+            flex-direction: column;
+        }
+
+        .voice-btn {
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            border-radius: 50%;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .voice-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.05);
+        }
+
+        .voice-btn.active {
+            background: #10b981;
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+        }
+        
+        .chat-messages {
+            flex: 1;
+            padding: 25px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            scroll-behavior: smooth;
+        }
+
+        .chat-messages::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .chat-messages::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 3px;
+        }
+        
+        .message {
+            max-width: 85%;
+            padding: 16px 20px;
+            border-radius: 20px;
+            font-size: 15px;
+            line-height: 1.5;
+            animation: messageSlide 0.4s ease-out;
+            position: relative;
+            word-wrap: break-word;
+        }
+        
+        .message.user {
+            background: linear-gradient(135deg, #5e60ce 0%, #7c3aed 100%);
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 6px;
+            box-shadow: 0 4px 12px rgba(94, 96, 206, 0.3);
+        }
+        
+        .message.bot {
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            color: #1e293b;
+            align-self: flex-start;
+            border-bottom-left-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .message.bot.has-products {
+            background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+            border: 1px solid #a7f3d0;
+        }
+
+        .message.bot.knowledge-enhanced {
+            background: linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%);
+            border: 1px solid #c4b5fd;
+        }
+
+        .message-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .message-time {
+            font-size: 11px;
+            opacity: 0.6;
+        }
+
+        .message-indicators {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .knowledge-badge {
+            background: rgba(139, 92, 246, 0.2);
+            color: #6b46c1;
+            padding: 2px 6px;
+            border-radius: 8px;
+            font-size: 9px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .product-badge {
+            background: rgba(16, 185, 129, 0.2);
+            color: #065f46;
+            padding: 2px 6px;
+            border-radius: 8px;
+            font-size: 9px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .voice-toggle {
+            background: none;
+            border: none;
+            color: inherit;
+            opacity: 0.7;
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+
+        .voice-toggle:hover {
+            opacity: 1;
+            background: rgba(0, 0, 0, 0.1);
+        }
+
+        .voice-toggle.playing {
+            color: #10b981;
+            opacity: 1;
+            animation: pulse 1.5s infinite;
+        }
+
+        /* Video container with enhanced display */
+        .video-container {
+            margin: 20px 0;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+            background: #000;
+        }
+
+        .avatar-video {
+            width: 100%;
+            height: auto;
+            min-height: 200px;
+            border-radius: 16px;
+            background: #000;
+        }
+
+        .video-placeholder {
+            width: 100%;
+            height: 220px;
+            background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #64748b;
+            border-radius: 16px;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .video-generating {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            color: #92400e;
+        }
+
+        .video-placeholder i {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            opacity: 0.7;
+        }
+
+        .video-status {
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .typing-indicator {
+            display: none;
+            align-self: flex-start;
+            background: rgba(248, 250, 252, 0.9);
+            backdrop-filter: blur(10px);
+            padding: 16px 20px;
+            border-radius: 20px;
+            border-bottom-left-radius: 6px;
+            max-width: 90px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+        
+        .typing-dots {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+        
+        .typing-dots span {
+            width: 8px;
+            height: 8px;
+            background: #64748b;
+            border-radius: 50%;
+            animation: typing 1.4s infinite;
+        }
+        
+        .typing-dots span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        
+        .typing-dots span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        
+        .chat-input-area {
+            padding: 25px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .input-container {
+            display: flex;
+            gap: 15px;
+            align-items: flex-end;
+            position: relative;
+        }
+        
+        .input-wrapper {
+            flex: 1;
+            position: relative;
+        }
+        
+        .chat-input {
+            width: 100%;
+            padding: 16px 20px;
+            border: 2px solid #e2e8f0;
+            border-radius: 22px;
+            font-size: 15px;
+            outline: none;
+            transition: all 0.3s ease;
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            resize: none;
+            min-height: 50px;
+            max-height: 120px;
+            font-family: inherit;
+        }
+        
+        .chat-input:focus {
+            border-color: #5e60ce;
+            box-shadow: 0 0 0 4px rgba(94, 96, 206, 0.1);
+            background: white;
+        }
+
+        .input-actions {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+
+        .voice-record-btn {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            font-size: 18px;
+            position: relative;
+        }
+
+        .voice-record-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 8px 25px rgba(16, 185, 129, 0.3);
+        }
+
+        .voice-record-btn.recording {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            animation: recordingPulse 1s infinite;
+        }
+
+        @keyframes recordingPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        
+        .send-btn {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, #5e60ce 0%, #7c3aed 100%);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            font-size: 18px;
+        }
+        
+        .send-btn:hover {
+            transform: scale(1.05) rotate(5deg);
+            box-shadow: 0 8px 25px rgba(94, 96, 206, 0.3);
+        }
+        
+        .send-btn:disabled {
+            background: #cbd5e1;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 20px;
+            z-index: 1000;
+        }
+        
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #f3f4f6;
+            border-top: 4px solid #5e60ce;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .loading-text {
+            color: #64748b;
+            font-weight: 500;
+            text-align: center;
+        }
+        
+        .error-message {
+            background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+            color: #991b1b;
+            padding: 15px 20px;
+            margin: 15px 20px;
+            border-radius: 12px;
+            border-left: 4px solid #ef4444;
+            font-size: 14px;
+            border: 1px solid #fca5a5;
+        }
+
+        .connection-status {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            padding: 6px 12px;
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 12px;
+            font-size: 11px;
+            opacity: 0.8;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .connection-status.connected {
+            background: rgba(16, 185, 129, 0.2);
+            color: #065f46;
+        }
+
+        .connection-status.disconnected {
+            background: rgba(239, 68, 68, 0.2);
+            color: #991b1b;
+        }
+
+        .welcome-message {
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            color: #1e40af;
+            border: 1px solid #93c5fd;
+            text-align: center;
+            font-weight: 500;
+        }
+
+        .quick-actions {
+            display: flex;
+            gap: 10px;
+            margin: 12px 0;
+            flex-wrap: wrap;
+        }
+
+        .quick-action {
+            background: rgba(94, 96, 206, 0.1);
+            color: #5e60ce;
+            border: 1px solid rgba(94, 96, 206, 0.2);
+            padding: 8px 14px;
+            border-radius: 18px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .quick-action:hover {
+            background: #5e60ce;
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        /* Enhanced product recommendations styling */
+        .product-grid {
+            display: grid;
+            gap: 15px;
+            margin: 18px 0;
+        }
+
+        .product-card {
+            background: white;
+            border-radius: 14px;
+            padding: 15px;
+            border: 1px solid #e2e8f0;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .product-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+            border-color: #5e60ce;
+        }
+
+        .product-header {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+
+        .product-image {
+            width: 60px;
+            height: 60px;
+            border-radius: 10px;
+            object-fit: cover;
+            background: #f1f5f9;
+        }
+
+        .product-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .product-name {
+            font-weight: 600;
+            font-size: 14px;
+            color: #1e293b;
+            margin-bottom: 6px;
+            line-height: 1.3;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .product-price {
+            font-weight: 700;
+            color: #059669;
+            font-size: 15px;
+            margin-bottom: 4px;
+        }
+
+        .product-rating {
+            font-size: 12px;
+            color: #6b7280;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .product-platform {
+            font-size: 10px;
+            color: #9ca3af;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 6px;
+        }
+        
+        @keyframes messageSlide {
+            from {
+                opacity: 0;
+                transform: translateY(15px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        @keyframes typing {
+            0%, 60%, 100% {
+                transform: translateY(0);
+            }
+            30% {
+                transform: translateY(-8px);
+            }
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Responsive design */
+        @media (max-width: 480px) {
+            body {
+                padding: 0;
+            }
+            
+            .chat-container {
+                height: 100vh;
+                max-width: 100%;
+                border-radius: 0;
+            }
+            
+            .chat-header {
+                padding: 25px 20px;
+            }
+            
+            .avatar-icon {
+                width: 70px;
+                height: 70px;
+                font-size: 28px;
+            }
+            
+            .username {
+                font-size: 1.4rem;
+            }
+        }
+
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="chat-container">
+        <div class="loading-overlay" id="loading-overlay">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Connecting to your AI assistant...</div>
+        </div>
+        
+        <div class="chat-header">
+            <div class="connection-status" id="connection-status">
+                <i class="fas fa-circle"></i>
+                <span>Connecting...</span>
+            </div>
+            <div class="avatar-info">
+                <div class="avatar-container">
+                    <div class="avatar-icon default-avatar" id="avatar-display">
+                        <i class="fas fa-robot"></i>
+                    </div>
+                </div>
+                <div class="user-details">
+                    <div class="username" id="influencer-name">AI Assistant</div>
+                    <div class="status" id="status">
+                        <i class="fas fa-circle" style="font-size: 8px; color: #10b981;"></i>
+                        Online & Ready
+                    </div>
+                    <div class="knowledge-indicator" id="knowledge-indicator" style="display: none;">
+                        <i class="fas fa-brain"></i>
+                        <span>Enhanced with knowledge</span>
+                    </div>
+                    <div class="capabilities-indicator" id="capabilities-indicator">
+                        <!-- Will be populated with capabilities -->
+                    </div>
+                </div>
+                <div class="voice-controls">
+                    <button class="voice-btn active" id="voice-mode-toggle" title="Toggle voice responses">
+                        <i class="fas fa-volume-up"></i>
+                    </button>
+                    <button class="voice-btn" id="mute-toggle" title="Mute/unmute">
+                        <i class="fas fa-volume-high"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="chat-messages" id="chat-messages">
+            <!-- Messages will be added here dynamically -->
+        </div>
+        
+        <div class="typing-indicator" id="typing-indicator">
+            <div class="typing-dots">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+        
+        <div class="chat-input-area">
+            <div class="input-container">
+                <div class="input-wrapper">
+                    <textarea 
+                        class="chat-input" 
+                        id="chat-input" 
+                        placeholder="Ask me anything..."
+                        maxlength="1000"
+                        rows="1"
+                        disabled
+                    ></textarea>
+                </div>
+                <div class="input-actions">
+                    <button class="voice-record-btn" id="voice-record-btn" title="Voice message">
+                        <i class="fas fa-microphone"></i>
+                    </button>
+                    <button class="send-btn" id="send-btn" disabled title="Send message">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class EnhancedChatApp {
+            constructor() {
+                this.API_BASE = 'http://localhost:2000/api';
+                this.username = null;
+                this.sessionId = null;
+                this.influencerData = null;
+                this.voiceEnabled = true;
+                this.isRecording = false;
+                this.mediaRecorder = null;
+                this.audioChunks = [];
+                this.isMuted = false;
+                this.currentAudio = null;
+                this.currentVideoRequests = new Set();
+                
+                // DOM elements
+                this.messagesContainer = document.getElementById('chat-messages');
+                this.chatInput = document.getElementById('chat-input');
+                this.sendBtn = document.getElementById('send-btn');
+                this.voiceRecordBtn = document.getElementById('voice-record-btn');
+                this.voiceModeToggle = document.getElementById('voice-mode-toggle');
+                this.muteToggle = document.getElementById('mute-toggle');
+                this.typingIndicator = document.getElementById('typing-indicator');
+                this.loadingOverlay = document.getElementById('loading-overlay');
+                this.connectionStatus = document.getElementById('connection-status');
+                this.avatarDisplay = document.getElementById('avatar-display');
+                this.knowledgeIndicator = document.getElementById('knowledge-indicator');
+                this.capabilitiesIndicator = document.getElementById('capabilities-indicator');
+                
+                this.init();
+            }
+            
+            async init() {
+                try {
+                    // Get username from URL
+                    const urlParams = new URLSearchParams(window.location.search);
+                    this.username = urlParams.get('username');
+                    
+                    if (!this.username) {
+                        this.showError('No username provided. Please check your link.');
+                        return;
+                    }
+                    
+                    console.log('🚀 Initializing enhanced chat for:', this.username);
+                    
+                    // Load influencer data with comprehensive info
+                    await this.loadInfluencerData();
+                    
+                    // Setup event listeners
+                    this.setupEventListeners();
+                    
+                    // Setup voice functionality
+                    await this.setupVoice();
+                    
+                    // Show enhanced welcome message
+                    this.showEnhancedWelcomeMessage();
+                    
+                    // Update connection status
+                    this.updateConnectionStatus('connected');
+                    
+                    // Hide loading overlay
+                    this.hideLoading();
+                    
+                } catch (error) {
+                    console.error('❌ Initialization error:', error);
+                    this.showError('Failed to initialize chat. Please try again.');
+                    this.updateConnectionStatus('disconnected');
+                    this.hideLoading();
+                }
+            }
+            
+            async loadInfluencerData() {
+                try {
+                    console.log('📡 Loading influencer data for:', this.username);
+                    
+                    const response = await fetch(`${this.API_BASE}/chat/${this.username}`);
+                    const data = await response.json();
+                    
+                    if (data.status === 'success') {
+                        this.influencerData = data.data;
+                        
+                        console.log('✅ Influencer data loaded:', {
+                            username: this.influencerData.username,
+                            has_avatar: this.influencerData.has_avatar,
+                            avatar_type: this.influencerData.avatar_type,
+                            voice_id: this.influencerData.voice_id,
+                            capabilities: this.influencerData.chat_capabilities
+                        });
+                        
+                        // Update UI with comprehensive info
+                        this.updateUIWithInfluencerData();
+                        
+                    } else {
+                        throw new Error(data.message || 'Failed to load influencer data');
+                    }
+                } catch (error) {
+                    console.error('❌ Failed to load influencer:', error);
+                    throw new Error('Influencer not found or chat unavailable');
+                }
+            }
+
+            updateUIWithInfluencerData() {
+                // Update title and header
+                document.getElementById('influencer-name').textContent = this.influencerData.username;
+                document.title = `Chat with ${this.influencerData.username} - AvatarCommerce`;
+                
+                // ENHANCED: Update status based on capabilities
+                this.updateStatusDisplay();
+                
+                // ENHANCED: Update avatar display
+                this.updateAvatarDisplay();
+                
+                // ENHANCED: Show capabilities
+                this.updateCapabilitiesDisplay();
+                
+                // ENHANCED: Show knowledge indicator if enhanced
+                if (this.influencerData.chat_capabilities.knowledge_enhanced) {
+                    this.knowledgeIndicator.style.display = 'flex';
+                }
+                
+                // Enable voice mode if user has avatar
+                if (this.influencerData.has_avatar) {
+                    this.voiceEnabled = true;
+                    this.voiceModeToggle.classList.add('active');
+                }
+            }
+
+            updateStatusDisplay() {
+                const statusEl = document.getElementById('status');
+                const capabilities = this.influencerData.chat_capabilities;
+                
+                if (capabilities.video_responses && capabilities.knowledge_enhanced) {
+                    statusEl.innerHTML = '<i class="fas fa-circle" style="font-size: 8px; color: #10b981;"></i> AI Avatar with Knowledge';
+                } else if (capabilities.video_responses) {
+                    statusEl.innerHTML = '<i class="fas fa-circle" style="font-size: 8px; color: #10b981;"></i> AI Avatar Ready';
+                } else if (capabilities.knowledge_enhanced) {
+                    statusEl.innerHTML = '<i class="fas fa-circle" style="font-size: 8px; color: #10b981;"></i> Knowledge-Enhanced Chat';
+                } else {
+                    statusEl.innerHTML = '<i class="fas fa-circle" style="font-size: 8px; color: #10b981;"></i> Chat Available';
+                }
+            }
+
+            updateAvatarDisplay() {
+                // Clear existing indicators
+                const existingIndicator = this.avatarDisplay.parentElement.querySelector('.custom-avatar-indicator');
+                if (existingIndicator) {
+                    existingIndicator.remove();
+                }
+
+                if (this.influencerData.has_avatar && this.influencerData.avatar_type === 'talking_photo') {
+                    // Show custom avatar
+                    this.avatarDisplay.className = 'avatar-icon custom-avatar';
+                    this.avatarDisplay.innerHTML = '<i class="fas fa-user-astronaut"></i>';
+                    
+                    // Add custom avatar indicator
+                    const indicator = document.createElement('div');
+                    indicator.className = 'custom-avatar-indicator';
+                    indicator.textContent = 'Custom';
+                    this.avatarDisplay.parentElement.appendChild(indicator);
+                    
+                    console.log('🎭 Displaying custom avatar interface');
+                    
+                } else if (this.influencerData.has_avatar) {
+                    // Show regular avatar
+                    this.avatarDisplay.className = 'avatar-icon';
+                    this.avatarDisplay.innerHTML = '<i class="fas fa-robot"></i>';
+                    console.log('🤖 Displaying standard avatar interface');
+                } else {
+                    // Show default assistant
+                    this.avatarDisplay.className = 'avatar-icon default-avatar';
+                    this.avatarDisplay.innerHTML = '<i class="fas fa-comments"></i>';
+                    console.log('💬 Displaying text chat interface');
+                }
+            }
+
+            updateCapabilitiesDisplay() {
+                const capabilities = this.influencerData.chat_capabilities;
+                let capabilitiesHtml = '';
+                
+                if (capabilities.video_responses) {
+                    capabilitiesHtml += '<div class="capability-badge"><i class="fas fa-video"></i> Video</div>';
+                }
+                if (capabilities.voice_responses) {
+                    capabilitiesHtml += '<div class="capability-badge"><i class="fas fa-microphone"></i> Voice</div>';
+                }
+                if (capabilities.product_recommendations) {
+                    capabilitiesHtml += '<div class="capability-badge"><i class="fas fa-shopping-cart"></i> Products</div>';
+                }
+                
+                this.capabilitiesIndicator.innerHTML = capabilitiesHtml;
+            }
+            
+            setupEventListeners() {
+                // Send button click
+                this.sendBtn.addEventListener('click', () => {
+                    this.sendMessage();
+                });
+                
+                // Enter key press (with Shift+Enter for new line)
+                this.chatInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        this.sendMessage();
+                    }
+                });
+                
+                // Auto-resize textarea
+                this.chatInput.addEventListener('input', () => {
+                    this.autoResizeTextarea();
+                    this.updateSendButton();
+                });
+                
+                // Voice recording
+                this.voiceRecordBtn.addEventListener('click', () => {
+                    this.toggleVoiceRecording();
+                });
+                
+                // Voice mode toggle
+                this.voiceModeToggle.addEventListener('click', () => {
+                    this.toggleVoiceMode();
+                });
+                
+                // Mute toggle
+                this.muteToggle.addEventListener('click', () => {
+                    this.toggleMute();
+                });
+            }
+
+            async setupVoice() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    stream.getTracks().forEach(track => track.stop());
+                    console.log('✅ Microphone access granted');
+                } catch (error) {
+                    console.warn('⚠️ Microphone access denied:', error);
+                    this.voiceRecordBtn.style.display = 'none';
+                }
+            }
+
+            autoResizeTextarea() {
+                const textarea = this.chatInput;
+                textarea.style.height = 'auto';
+                const newHeight = Math.min(textarea.scrollHeight, 120);
+                textarea.style.height = newHeight + 'px';
+            }
+
+            updateSendButton() {
+                const hasText = this.chatInput.value.trim().length > 0;
+                this.sendBtn.disabled = !hasText;
+            }
+
+            updateConnectionStatus(status) {
+                const statusEl = this.connectionStatus;
+                statusEl.className = `connection-status ${status}`;
+                
+                if (status === 'connected') {
+                    statusEl.innerHTML = '<i class="fas fa-circle"></i><span>Connected</span>';
+                } else {
+                    statusEl.innerHTML = '<i class="fas fa-circle"></i><span>Offline</span>';
+                }
+            }
+            
+            showEnhancedWelcomeMessage() {
+                const welcomeText = `Hi! I'm ${this.influencerData.username}'s AI assistant. How can I help you today?`;
+                this.addMessage(welcomeText, 'bot', 'welcome-message');
+                
+                // Show bio if available
+                if (this.influencerData.bio) {
+                    setTimeout(() => {
+                        this.addMessage(`About ${this.influencerData.username}: ${this.influencerData.bio}`, 'system');
+                    }, 1000);
+                }
+
+                // Show avatar and voice info
+                setTimeout(() => {
+                    this.addAvatarInfoMessage();
+                }, 1500);
+
+                // Show capabilities
+                setTimeout(() => {
+                    this.addCapabilitiesMessage();
+                }, 2000);
+
+                // Add quick actions
+                setTimeout(() => {
+                    this.addQuickActions();
+                }, 2500);
+            }
+
+            addAvatarInfoMessage() {
+                let avatarInfo = '';
+                
+                if (this.influencerData.has_avatar && this.influencerData.avatar_type === 'talking_photo') {
+                    avatarInfo = `🎭 I'm ${this.influencerData.username}'s custom AI avatar created from their photo! I can respond with video messages in their voice.`;
+                } else if (this.influencerData.has_avatar) {
+                    avatarInfo = `🤖 I'm ${this.influencerData.username}'s AI avatar! I can respond with video messages.`;
+                } else {
+                    avatarInfo = `💬 I'm ${this.influencerData.username}'s AI assistant! I can respond with voice messages.`;
+                }
+                
+                if (avatarInfo) {
+                    this.addMessage(avatarInfo, 'system');
+                }
+            }
+
+            addCapabilitiesMessage() {
+                const capabilities = this.influencerData.chat_capabilities;
+                let featuresText = "I can help you with: ";
+                let features = [];
+                
+                if (capabilities.knowledge_enhanced) {
+                    features.push("personalized advice based on my knowledge");
+                }
+                if (capabilities.product_recommendations) {
+                    features.push("product recommendations");
+                }
+                if (capabilities.video_responses) {
+                    features.push("video responses using my avatar");
+                }
+                if (capabilities.voice_responses) {
+                    features.push("voice messages");
+                }
+                
+                if (features.length > 0) {
+                    featuresText += features.join(", ") + ".";
+                    this.addMessage(featuresText, 'system');
+                }
+            }
+
+            addQuickActions() {
+                const capabilities = this.influencerData.chat_capabilities;
+                let actions = [];
+                
+                if (capabilities.product_recommendations) {
+                    actions.push('🛍️ Product recommendations');
+                }
+                if (capabilities.knowledge_enhanced) {
+                    actions.push('💡 Your expertise');
+                }
+                actions.push('✨ General advice');
+                
+                const quickActionsHtml = `
+                    <div class="quick-actions">
+                        ${actions.map(action => 
+                            `<div class="quick-action" onclick="window.chatApp.sendQuickMessage('${action.replace('🛍️ ', 'What ').replace('💡 ', 'Tell me about ').replace('✨ ', 'Give me some ')}')">${action}</div>`
+                        ).join('')}
+                    </div>
+                `;
+                
+                const messageEl = document.createElement('div');
+                messageEl.className = 'message system';
+                messageEl.innerHTML = 'Quick questions:' + quickActionsHtml;
+                
+                this.messagesContainer.appendChild(messageEl);
+                this.scrollToBottom();
+            }
+
+            sendQuickMessage(message) {
+                this.chatInput.value = message;
+                this.sendMessage();
+            }
+            
+            async sendMessage() {
+                const message = this.chatInput.value.trim();
+                if (!message) return;
+                
+                // Disable input
+                this.setInputState(false);
+                
+                // Add user message
+                this.addMessage(message, 'user');
+                
+                // Clear input
+                this.chatInput.value = '';
+                this.autoResizeTextarea();
+                
+                // Show typing indicator
+                this.showTyping();
+                
+                try {
+                    console.log('📤 Sending message:', message);
+                    console.log('🎭 Avatar available:', this.influencerData.has_avatar);
+                    console.log('🎤 Voice enabled:', this.voiceEnabled);
+                    
+                    // ENHANCED: Send with avatar and voice preferences
+                    const requestBody = {
+                        message: message,
+                        username: this.username,
+                        session_id: this.sessionId,
+                        voice_mode: this.voiceEnabled && !this.isMuted,
+                        video_mode: this.influencerData.chat_capabilities.video_responses,
+                        use_knowledge: true,
+                        preferred_voice_id: this.influencerData.voice_id
+                    };
+                    
+                    const response = await fetch(`${this.API_BASE}/chat`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(requestBody)
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.status === 'success') {
+                        // Update session ID
+                        if (data.data.session_id) {
+                            this.sessionId = data.data.session_id;
+                        }
+                        
+                        // Add bot response with delay for natural feel
+                        setTimeout(() => {
+                            this.hideTyping();
+                            
+                            // ENHANCED: Check response features and add appropriate styling
+                            const hasProducts = data.data.products_included;
+                            const isKnowledgeEnhanced = data.data.knowledge_enhanced;
+                            const hasVideo = data.data.video_url && data.data.video_url.length > 0;
+                            const hasAudio = data.data.audio_url && data.data.audio_url.length > 0;
+                            
+                            let messageClass = 'bot';
+                            if (hasProducts) messageClass += ' has-products';
+                            if (isKnowledgeEnhanced) messageClass += ' knowledge-enhanced';
+                            
+                            this.addMessage(data.data.text, messageClass, '', isKnowledgeEnhanced, hasProducts);
+                            
+                            // ENHANCED: Handle video response with proper avatar integration
+                            if (hasVideo) {
+                                console.log('🎬 Adding video response');
+                                this.addVideoMessage(data.data.video_url);
+                            }
+                            
+                            // ENHANCED: Handle audio response with user's voice
+                            if (hasAudio && this.voiceEnabled && !this.isMuted) {
+                                console.log('🔊 Playing audio response with user voice');
+                                this.playAudioResponse(data.data.audio_url);
+                            }
+                            
+                        }, 800 + Math.random() * 1200);
+                        
+                    } else {
+                        throw new Error(data.message || 'Failed to send message');
+                    }
+                    
+                } catch (error) {
+                    console.error('❌ Send message error:', error);
+                    this.hideTyping();
+                    this.addMessage('Sorry, I\'m having trouble responding right now. Please try again in a moment.', 'bot');
+                    this.updateConnectionStatus('disconnected');
+                    
+                    // Try to reconnect
+                    setTimeout(() => {
+                        this.updateConnectionStatus('connected');
+                    }, 3000);
+                } finally {
+                    this.setInputState(true);
+                }
+            }
+
+            async playAudioResponse(audioUrl) {
+                try {
+                    console.log('🔊 Playing audio response with custom voice');
+                    
+                    if (this.currentAudio) {
+                        this.currentAudio.pause();
+                    }
+                    
+                    this.currentAudio = new Audio(audioUrl);
+                    
+                    this.currentAudio.addEventListener('loadstart', () => {
+                        console.log('🔄 Audio loading...');
+                    });
+                    
+                    this.currentAudio.addEventListener('canplay', () => {
+                        console.log('✅ Audio ready to play');
+                        if (!this.isMuted) {
+                            this.currentAudio.play().catch(e => {
+                                console.warn('⚠️ Audio autoplay blocked:', e);
+                                this.showAudioPlaybackOption();
+                            });
+                        }
+                    });
+                    
+                    this.currentAudio.addEventListener('error', (e) => {
+                        console.error('❌ Audio playback error:', e);
+                        this.addMessage('🔊 Voice response failed to load. Please check your connection.', 'system');
+                    });
+                    
+                    this.currentAudio.addEventListener('ended', () => {
+                        console.log('✅ Audio playback completed');
+                    });
+                    
+                } catch (error) {
+                    console.error('❌ Audio setup error:', error);
+                }
+            }
+
+            showAudioPlaybackOption() {
+                // Add a message with play button for blocked audio
+                const messageEl = document.createElement('div');
+                messageEl.className = 'message system';
+                messageEl.innerHTML = `
+                    🔊 Voice response ready 
+                    <button onclick="this.parentElement.parentElement.previousElementSibling.currentAudio.play()" 
+                            style="background: #10b981; color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-left: 8px; cursor: pointer;">
+                        <i class="fas fa-play"></i> Play
+                    </button>
+                `;
+                this.messagesContainer.appendChild(messageEl);
+                this.scrollToBottom();
+            }
+            
+            addMessage(text, type = 'bot', extraClass = '', isKnowledgeEnhanced = false, hasProducts = false) {
+                const messageEl = document.createElement('div');
+                messageEl.className = `message ${type} ${extraClass}`;
+                
+                const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                
+                let messageContent = text;
+                
+                // Enhanced product recommendation parsing
+                if (type === 'bot' && hasProducts) {
+                    messageContent = this.enhanceProductDisplay(text);
+                }
+                
+                // Add message indicators
+                let indicators = '';
+                if (isKnowledgeEnhanced) {
+                    indicators += '<span class="knowledge-badge">Knowledge</span>';
+                }
+                if (hasProducts) {
+                    indicators += '<span class="product-badge">Products</span>';
+                }
+                
+                // Add voice toggle for bot messages
+                if (type === 'bot' && this.voiceEnabled) {
+                    messageEl.innerHTML = `
+                        <div class="message-header">
+                            <span class="message-time">${timestamp}</span>
+                            <div class="message-indicators">
+                                ${indicators}
+                                <button class="voice-toggle" onclick="window.chatApp.speakMessage('${encodeURIComponent(text)}', this)">
+                                    <i class="fas fa-volume-up"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="message-content">${messageContent}</div>
+                    `;
+                } else {
+                    messageEl.innerHTML = `
+                        <div class="message-header">
+                            <span class="message-time">${timestamp}</span>
+                            <div class="message-indicators">${indicators}</div>
+                        </div>
+                        <div class="message-content">${messageContent}</div>
+                    `;
+                }
+                
+                this.messagesContainer.appendChild(messageEl);
+                this.scrollToBottom();
+            }
+
+            enhanceProductDisplay(text) {
+                // Enhanced product display with better formatting
+                let enhancedText = text;
+                
+                // Look for product sections and enhance them
+                if (text.includes('🛍️')) {
+                    const lines = text.split('\n');
+                    let inProductSection = false;
+                    let products = [];
+                    let currentProduct = {};
+                    
+                    lines.forEach(line => {
+                        if (line.includes('🛍️')) {
+                            inProductSection = true;
+                        } else if (inProductSection && line.includes('**') && line.includes('.')) {
+                            currentProduct.name = line.replace(/\*\*/g, '').replace(/^\d+\.\s*/, '');
+                        } else if (inProductSection && line.includes('💰')) {
+                            currentProduct.price = line;
+                            if (currentProduct.name) {
+                                products.push({...currentProduct});
+                                currentProduct = {};
+                            }
+                        }
+                    });
+                    
+                    if (products.length > 0) {
+                        let productHtml = text.split('🛍️')[0] + '<div class="product-grid">';
+                        
+                        products.forEach(product => {
+                            productHtml += `
+                                <div class="product-card">
+                                    <div class="product-header">
+                                        <div class="product-image" style="background: linear-gradient(135deg, #e2e8f0, #cbd5e1); display: flex; align-items: center; justify-content: center;">
+                                            <i class="fas fa-box" style="color: #64748b; font-size: 1.5rem;"></i>
+                                        </div>
+                                        <div class="product-info">
+                                            <div class="product-name">${product.name}</div>
+                                            <div class="product-price">${product.price}</div>
+                                            <div class="product-rating">
+                                                <i class="fas fa-star" style="color: #fbbf24;"></i>
+                                                <span>Recommended by ${this.influencerData.username}</span>
+                                            </div>
+                                            <div class="product-platform">Via Affiliate Network</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        
+                        productHtml += '</div>';
+                        enhancedText = productHtml;
+                    }
+                }
+                
+                return enhancedText;
+            }
+
+            // ENHANCED: Speak message using proper voice API
+            async speakMessage(encodedText, buttonEl) {
+                const text = decodeURIComponent(encodedText);
+                
+                if (this.isMuted) {
+                    this.addMessage('🔇 Audio is muted. Click the mute button to enable sound.', 'system');
+                    return;
+                }
+                
+                // Use backend voice generation with user's preferred voice
+                try {
+                    console.log('🎤 Generating voice response with user\'s preferred voice');
+                    buttonEl.classList.add('playing');
+                    buttonEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                    
+                    const response = await fetch(`${this.API_BASE}/voice/preview`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            text: text.substring(0, 200), // Limit for preview
+                            voice_id: this.influencerData.voice_id
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (response.ok && data.status === 'success' && data.data.audio_url) {
+                        console.log('✅ Voice generated, playing audio');
+                        
+                        if (this.currentAudio) {
+                            this.currentAudio.pause();
+                        }
+                        
+                        this.currentAudio = new Audio(data.data.audio_url);
+                        this.currentAudio.play().catch(e => {
+                            console.warn('Audio play blocked:', e);
+                            this.fallbackToSpeechSynthesis(text, buttonEl);
+                        });
+                        
+                        this.currentAudio.addEventListener('ended', () => {
+                            buttonEl.classList.remove('playing');
+                            buttonEl.innerHTML = '<i class="fas fa-volume-up"></i>';
+                        });
+                        
+                    } else {
+                        console.warn('⚠️ Voice API failed, falling back to speech synthesis');
+                        this.fallbackToSpeechSynthesis(text, buttonEl);
+                    }
+                    
+                } catch (error) {
+                    console.error('❌ Voice generation error:', error);
+                    this.fallbackToSpeechSynthesis(text, buttonEl);
+                }
+            }
+
+            fallbackToSpeechSynthesis(text, buttonEl) {
+                if (!('speechSynthesis' in window)) {
+                    this.addMessage('🔇 Text-to-speech not supported in this browser.', 'system');
+                    buttonEl.classList.remove('playing');
+                    buttonEl.innerHTML = '<i class="fas fa-volume-up"></i>';
+                    return;
+                }
+                
+                // Stop any current speech
+                speechSynthesis.cancel();
+                
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 0.9;
+                utterance.pitch = 1.0;
+                utterance.volume = 0.8;
+                
+                // Try to use a good voice
+                const voices = speechSynthesis.getVoices();
+                const preferredVoice = voices.find(voice => 
+                    voice.name.includes('Google') || 
+                    voice.name.includes('Microsoft') ||
+                    voice.lang.includes('en')
+                );
+                
+                if (preferredVoice) {
+                    utterance.voice = preferredVoice;
+                }
+                
+                utterance.onstart = () => {
+                    buttonEl.classList.add('playing');
+                    buttonEl.innerHTML = '<i class="fas fa-volume-mute"></i>';
+                };
+                
+                utterance.onend = () => {
+                    buttonEl.classList.remove('playing');
+                    buttonEl.innerHTML = '<i class="fas fa-volume-up"></i>';
+                };
+                
+                speechSynthesis.speak(utterance);
+            }
+            
+            addVideoMessage(videoUrl) {
+                console.log('🎬 Adding video response from avatar');
+                
+                const videoEl = document.createElement('div');
+                videoEl.className = 'message bot';
+                
+                const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                
+                videoEl.innerHTML = `
+                    <div class="message-header">
+                        <span class="message-time">${timestamp}</span>
+                        <span style="font-size: 11px; opacity: 0.6;">
+                            <i class="fas fa-video"></i> ${this.influencerData.avatar_type === 'talking_photo' ? 'Custom Avatar' : 'AI Avatar'} Response
+                        </span>
+                    </div>
+                    <div class="video-container">
+                        <video class="avatar-video" controls preload="metadata" poster="">
+                            <source src="${videoUrl}" type="video/mp4">
+                            Your browser does not support video playback.
+                        </video>
+                    </div>
+                    <div style="text-align: center; margin-top: 10px; font-size: 12px; color: #64748b;">
+                        <i class="fas fa-user-astronaut"></i> ${this.influencerData.username}'s AI Avatar
+                        ${this.influencerData.voice_id ? '<span style="margin-left: 8px;">• Custom Voice</span>' : ''}
+                    </div>
+                `;
+                
+                this.messagesContainer.appendChild(videoEl);
+                this.scrollToBottom();
+                
+                // Enhanced video event handling
+                setTimeout(() => {
+                    const video = videoEl.querySelector('video');
+                    
+                    video.addEventListener('loadedmetadata', () => {
+                        console.log('✅ Avatar video loaded successfully');
+                    });
+                    
+                    video.addEventListener('error', (e) => {
+                        console.error('❌ Video failed to load:', e);
+                        videoEl.querySelector('.video-container').innerHTML = `
+                            <div class="video-placeholder">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                <div class="video-status">Video could not be loaded</div>
+                                <div style="font-size: 12px; margin-top: 8px;">Please check your connection</div>
+                            </div>
+                        `;
+                    });
+                    
+                    video.addEventListener('loadstart', () => {
+                        console.log('🔄 Video loading started...');
+                    });
+                    
+                }, 100);
+            }
+
+            async toggleVoiceRecording() {
+                if (this.isRecording) {
+                    this.stopRecording();
+                } else {
+                    await this.startRecording();
+                }
+            }
+
+            async startRecording() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            sampleRate: 44100
+                        }
+                    });
+                    
+                    this.mediaRecorder = new MediaRecorder(stream, {
+                        mimeType: 'audio/webm;codecs=opus'
+                    });
+                    
+                    this.audioChunks = [];
+                    
+                    this.mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) {
+                            this.audioChunks.push(event.data);
+                        }
+                    };
+                    
+                    this.mediaRecorder.onstop = () => {
+                        this.processRecording();
+                        stream.getTracks().forEach(track => track.stop());
+                    };
+                    
+                    this.mediaRecorder.start();
+                    this.isRecording = true;
+                    
+                    // Update UI
+                    this.voiceRecordBtn.classList.add('recording');
+                    this.voiceRecordBtn.innerHTML = '<i class="fas fa-stop"></i>';
+                    this.chatInput.placeholder = 'Recording... Tap the red button to stop';
+                    
+                    console.log('🎙️ Started recording');
+                    
+                } catch (error) {
+                    console.error('❌ Recording failed:', error);
+                    this.showError('Could not access microphone. Please check permissions.');
+                }
+            }
+
+            stopRecording() {
+                if (this.mediaRecorder && this.isRecording) {
+                    this.mediaRecorder.stop();
+                    this.isRecording = false;
+                    
+                    // Update UI
+                    this.voiceRecordBtn.classList.remove('recording');
+                    this.voiceRecordBtn.innerHTML = '<i class="fas fa-cog fa-spin"></i>';
+                    this.chatInput.placeholder = 'Processing your speech...';
+                    
+                    console.log('🛑 Stopped recording');
+                }
+            }
+
+            async processRecording() {
+                try {
+                    const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+                    
+                    // Send to speech-to-text API
+                    const formData = new FormData();
+                    formData.append('audio', audioBlob, 'recording.webm');
+                    
+                    const response = await fetch(`${this.API_BASE}/speech-to-text`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.status === 'success' && data.data.transcription) {
+                        const transcription = data.data.transcription;
+                        
+                        // Set the transcribed text in the input
+                        this.chatInput.value = transcription;
+                        this.autoResizeTextarea();
+                        this.updateSendButton();
+                        
+                        // Show user what was transcribed
+                        this.addMessage(`🎙️ "${transcription}"`, 'user');
+                        
+                        // Auto-send if it's a complete sentence
+                        if (transcription.trim().endsWith('.') || transcription.trim().endsWith('?') || transcription.trim().endsWith('!')) {
+                            setTimeout(() => {
+                                this.sendMessage();
+                            }, 1000);
+                        }
+                    } else {
+                        this.addMessage('🎙️ Sorry, I couldn\'t understand that. Please try speaking again or type your message.', 'system');
+                    }
+                    
+                } catch (error) {
+                    console.error('❌ Audio processing failed:', error);
+                    this.showError('Failed to process voice message. Please try again.');
+                } finally {
+                    // Reset UI state
+                    this.voiceRecordBtn.innerHTML = '<i class="fas fa-microphone"></i>';
+                    this.chatInput.placeholder = 'Ask me anything...';
+                }
+            }
+
+            toggleVoiceMode() {
+                this.voiceEnabled = !this.voiceEnabled;
+                
+                if (this.voiceEnabled) {
+                    this.voiceModeToggle.classList.add('active');
+                    this.voiceModeToggle.innerHTML = '<i class="fas fa-volume-up"></i>';
+                    
+                    if (this.influencerData.chat_capabilities.video_responses) {
+                        this.addMessage('🎬 Video and voice responses enabled', 'system');
+                    } else {
+                        this.addMessage('🔊 Voice responses enabled', 'system');
+                    }
+                } else {
+                    this.voiceModeToggle.classList.remove('active');
+                    this.voiceModeToggle.innerHTML = '<i class="fas fa-volume-mute"></i>';
+                    this.addMessage('🔇 Voice responses disabled', 'system');
+                    
+                    // Stop any playing audio
+                    if (this.currentAudio) {
+                        this.currentAudio.pause();
+                    }
+                }
+            }
+
+            toggleMute() {
+                this.isMuted = !this.isMuted;
+                
+                if (this.isMuted) {
+                    this.muteToggle.innerHTML = '<i class="fas fa-volume-mute"></i>';
+                    this.muteToggle.classList.remove('active');
+                    if (this.currentAudio) {
+                        this.currentAudio.pause();
+                    }
+                    this.addMessage('🔇 Audio muted', 'system');
+                } else {
+                    this.muteToggle.innerHTML = '<i class="fas fa-volume-high"></i>';
+                    this.muteToggle.classList.add('active');
+                    this.addMessage('🔊 Audio unmuted', 'system');
+                }
+            }
+            
+            showTyping() {
+                this.typingIndicator.style.display = 'flex';
+                this.scrollToBottom();
+            }
+            
+            hideTyping() {
+                this.typingIndicator.style.display = 'none';
+            }
+            
+            setInputState(enabled) {
+                this.chatInput.disabled = !enabled;
+                this.updateSendButton();
+                
+                if (enabled) {
+                    this.chatInput.focus();
+                }
+            }
+            
+            scrollToBottom() {
+                setTimeout(() => {
+                    this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+                }, 100);
+            }
+            
+            showError(message) {
+                const errorEl = document.createElement('div');
+                errorEl.className = 'error-message';
+                errorEl.innerHTML = `
+                    <i class="fas fa-exclamation-triangle" style="margin-right: 8px;"></i>
+                    ${message}
+                `;
+                
+                const header = document.querySelector('.chat-header');
+                header.insertAdjacentElement('afterend', errorEl);
+                
+                setTimeout(() => {
+                    if (errorEl.parentNode) {
+                        errorEl.remove();
+                    }
+                }, 5000);
+            }
+            
+            hideLoading() {
+                this.loadingOverlay.style.display = 'none';
+                this.setInputState(true);
+            }
+        }
+        
+        // Initialize enhanced chat when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            window.chatApp = new EnhancedChatApp();
+        });
+
+        // Handle page visibility for better performance
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                if (window.chatApp && window.chatApp.currentAudio) {
+                    window.chatApp.currentAudio.pause();
+                }
+                if (window.chatApp && window.chatApp.isRecording) {
+                    window.chatApp.stopRecording();
+                }
+            }
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (window.chatApp && window.chatApp.isRecording) {
+                window.chatApp.stopRecording();
+            }
+        });
+
+        console.log('💬 Enhanced Chat App with Avatar Integration loaded');
+    </script>
+
+</body>
+</html>

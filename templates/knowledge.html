@@ -1,0 +1,1219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Knowledge - AvatarCommerce</title>
+    <style>
+        /* Reset and base styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: #f9f9fb;
+            color: #333;
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+        }
+        
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            background-color: #27293d;
+            color: #fff;
+            height: 100vh;
+            position: fixed;
+            left: 0;
+            top: 0;
+            overflow-y: auto;
+        }
+        
+        .sidebar-header {
+            padding: 25px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #fff;
+        }
+        
+        .logo span {
+            color: #64dfdf;
+        }
+        
+        .sidebar-menu {
+            padding: 20px 0;
+        }
+        
+        .menu-category {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.5);
+            margin: 15px 20px 10px;
+            letter-spacing: 1px;
+        }
+        
+        .menu-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            color: rgba(255, 255, 255, 0.8);
+            text-decoration: none;
+            transition: all 0.3s;
+        }
+        
+        .menu-item:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+        
+        .menu-item.active {
+            background-color: #5e60ce;
+            color: #fff;
+            border-left: 4px solid #64dfdf;
+        }
+        
+        .menu-item i {
+            margin-right: 10px;
+            font-size: 1.1rem;
+            width: 20px;
+            text-align: center;
+        }
+        
+        .sidebar-footer {
+            padding: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: #64dfdf;
+            color: #27293d;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1rem;
+            margin-right: 12px;
+        }
+        
+        .user-details {
+            flex: 1;
+        }
+        
+        .user-name {
+            font-weight: 600;
+            font-size: 0.95rem;
+            margin-bottom: 2px;
+        }
+        
+        .user-role {
+            font-size: 0.8rem;
+            color: rgba(255, 255, 255, 0.6);
+        }
+        
+        .logout-btn {
+            width: 100%;
+            padding: 8px 15px;
+            background-color: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        
+        .logout-btn:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+        
+        /* Main content */
+        .main-content {
+            margin-left: 260px;
+            padding: 30px;
+            width: calc(100% - 260px);
+        }
+        
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        
+        .page-title {
+            font-size: 2rem;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .header-actions {
+            display: flex;
+            gap: 15px;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background-color: #5e60ce;
+            color: #fff;
+        }
+        
+        .btn-primary:hover {
+            background-color: #4c4fd6;
+            transform: translateY(-1px);
+        }
+        
+        .btn-secondary {
+            background-color: #fff;
+            color: #5e60ce;
+            border: 1px solid #5e60ce;
+        }
+        
+        .btn-secondary:hover {
+            background-color: #5e60ce;
+            color: #fff;
+        }
+        
+        /* Alert */
+        .alert {
+            padding: 15px 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+            font-weight: 500;
+        }
+        
+        .alert.success {
+            background-color: #ecfdf5;
+            color: #065f46;
+            border: 1px solid #6ee7b7;
+        }
+        
+        .alert.error {
+            background-color: #fef2f2;
+            color: #b91c1c;
+            border: 1px solid #fca5a5;
+        }
+        
+        .alert.info {
+            background-color: #eff6ff;
+            color: #1e40af;
+            border: 1px solid #93c5fd;
+        }
+        
+        /* Knowledge container */
+        .knowledge-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            max-width: 1200px;
+        }
+        
+        .knowledge-panel {
+            background-color: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        
+        .panel-header {
+            background-color: #f8fafc;
+            padding: 20px 25px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        
+        .panel-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        
+        .panel-subtitle {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        
+        .panel-body {
+            padding: 25px;
+        }
+        
+        /* Form styles */
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #374151;
+        }
+        
+        .form-input, .form-textarea {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            transition: border-color 0.3s;
+        }
+        
+        .form-input:focus, .form-textarea:focus {
+            outline: none;
+            border-color: #5e60ce;
+            box-shadow: 0 0 0 3px rgba(94, 96, 206, 0.1);
+        }
+        
+        .form-textarea {
+            resize: vertical;
+            min-height: 120px;
+        }
+        
+        .char-counter {
+            text-align: right;
+            font-size: 0.8rem;
+            color: #6b7280;
+            margin-top: 5px;
+        }
+        
+        /* File upload area */
+        .upload-area {
+            border: 2px dashed #d1d5db;
+            border-radius: 8px;
+            padding: 40px 20px;
+            text-align: center;
+            transition: all 0.3s;
+            cursor: pointer;
+            background-color: #fafafa;
+        }
+        
+        .upload-area:hover {
+            border-color: #5e60ce;
+            background-color: rgba(94, 96, 206, 0.02);
+        }
+        
+        .upload-area.dragover {
+            border-color: #5e60ce;
+            background-color: rgba(94, 96, 206, 0.05);
+            transform: scale(1.02);
+        }
+        
+        .upload-icon {
+            font-size: 2.5rem;
+            color: #5e60ce;
+            margin-bottom: 15px;
+        }
+        
+        .upload-text {
+            margin-bottom: 15px;
+            color: #374151;
+            font-weight: 500;
+        }
+        
+        .upload-hint {
+            font-size: 0.9rem;
+            color: #6b7280;
+            margin-bottom: 20px;
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        /* File list */
+        .file-list {
+            margin-top: 20px;
+        }
+        
+        .file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 15px;
+            background-color: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+        
+        .file-info {
+            display: flex;
+            align-items: center;
+            flex: 1;
+        }
+        
+        .file-icon {
+            margin-right: 12px;
+            font-size: 1.2rem;
+            color: #5e60ce;
+        }
+        
+        .file-details {
+            flex: 1;
+        }
+        
+        .file-name {
+            font-weight: 500;
+            color: #374151;
+            margin-bottom: 2px;
+        }
+        
+        .file-size {
+            font-size: 0.8rem;
+            color: #6b7280;
+        }
+        
+        .file-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn-small {
+            padding: 5px 10px;
+            font-size: 0.8rem;
+            border-radius: 4px;
+        }
+        
+        .btn-danger {
+            background-color: #dc2626;
+            color: #fff;
+        }
+        
+        .btn-danger:hover {
+            background-color: #b91c1c;
+        }
+        
+        /* Knowledge preview */
+        .knowledge-preview {
+            background-color: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        
+        .preview-title {
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #374151;
+        }
+        
+        .preview-content {
+            color: #6b7280;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+        
+        .knowledge-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .stat-item {
+            text-align: center;
+            padding: 15px;
+            background-color: #f1f5f9;
+            border-radius: 6px;
+        }
+        
+        .stat-number {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #5e60ce;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            font-size: 0.8rem;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        /* Progress indicator */
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background-color: #e5e7eb;
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background-color: #5e60ce;
+            transition: width 0.3s;
+            width: 0%;
+        }
+        
+        /* Responsive design */
+        @media (max-width: 1024px) {
+            .knowledge-container {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 70px;
+                overflow: visible;
+            }
+            
+            .sidebar-header {
+                padding: 20px 0;
+                text-align: center;
+            }
+            
+            .logo span {
+                display: none;
+            }
+            
+            .menu-category {
+                display: none;
+            }
+            
+            .menu-item span {
+                display: none;
+            }
+            
+            .menu-item {
+                padding: 15px 0;
+                justify-content: center;
+            }
+            
+            .menu-item i {
+                margin-right: 0;
+                font-size: 1.3rem;
+            }
+            
+            .sidebar-footer {
+                display: none;
+            }
+            
+            .main-content {
+                margin-left: 70px;
+                padding: 20px;
+            }
+            
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+            
+            .header-actions {
+                width: 100%;
+                justify-content: flex-end;
+            }
+        }
+    </style>
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+    <!-- Sidebar navigation -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">Avatar<span>Commerce</span></div>
+        </div>
+        
+        <nav class="sidebar-menu">
+            <div class="menu-category">GENERAL</div>
+            <a href="dashboard.html" class="menu-item">
+                <i class="fas fa-tachometer-alt"></i>
+                <span>Dashboard</span>
+            </a>
+            <a href="analytics.html" class="menu-item">
+                <i class="fas fa-chart-line"></i>
+                <span>Analytics</span>
+            </a>
+            
+            <div class="menu-category">AVATAR</div>
+            <a href="avatar-setup.html" class="menu-item">
+                <i class="fas fa-robot"></i>
+                <span>Avatar Setup</span>
+            </a>
+            <a href="voice-setup.html" class="menu-item">
+                <i class="fas fa-microphone"></i>
+                <span>Voice Setup</span>
+            </a>
+            <a href="knowledge.html" class="menu-item active">
+                <i class="fas fa-brain"></i>
+                <span>Add Knowledge</span>
+            </a>
+            
+            <div class="menu-category">AFFILIATE</div>
+            <a href="affiliate-management.html" class="menu-item">
+                <i class="fas fa-link"></i>
+                <span>Affiliate Management</span>
+            </a>
+            
+            <div class="menu-category">ACCOUNT</div>
+            <a href="settings.html" class="menu-item">
+                <i class="fas fa-cog"></i>
+                <span>Settings</span>
+            </a>
+        </nav>
+        
+        <!-- Add this missing section -->
+        <div class="sidebar-footer">
+            <div class="user-info">
+                <div class="user-avatar" id="user-avatar">U</div>
+                <div class="user-details">
+                    <div class="user-name" id="user-name">Username</div>
+                    <div class="user-role">Influencer</div>
+                </div>
+            </div>
+            <button id="logout-btn" class="logout-btn">Sign Out</button>
+        </div>
+    </aside>
+
+    <!-- Main content area -->
+    <main class="main-content">
+        <div class="header">
+            <h1 class="page-title">Add Knowledge</h1>
+            <div class="header-actions">
+                <a href="dashboard.html" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i> Back to Dashboard
+                </a>
+            </div>
+        </div>
+        
+        <!-- Alert container -->
+        <div id="alert" class="alert"></div>
+        
+        <!-- Knowledge setup container -->
+        <div class="knowledge-container">
+            <!-- Personal Information Panel -->
+            <div class="knowledge-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Personal Information</div>
+                    <div class="panel-subtitle">Tell your fans about yourself</div>
+                </div>
+                <div class="panel-body">
+                    <form id="personal-info-form">
+                        <div class="form-group">
+                            <label for="bio" class="form-label">
+                                <i class="fas fa-user"></i> Bio & Background
+                            </label>
+                            <textarea 
+                                id="bio" 
+                                name="bio" 
+                                class="form-textarea" 
+                                placeholder="Share your story, background, interests, and what makes you unique..."
+                                maxlength="1000"
+                            ></textarea>
+                            <div class="char-counter">
+                                <span id="bio-count">0</span>/1000 characters
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="expertise" class="form-label">
+                                <i class="fas fa-star"></i> Areas of Expertise
+                            </label>
+                            <textarea 
+                                id="expertise" 
+                                name="expertise" 
+                                class="form-textarea" 
+                                placeholder="What topics do you know best? What are your specialties and areas of knowledge?"
+                                maxlength="500"
+                            ></textarea>
+                            <div class="char-counter">
+                                <span id="expertise-count">0</span>/500 characters
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="personality" class="form-label">
+                                <i class="fas fa-heart"></i> Personality & Communication Style
+                            </label>
+                            <textarea 
+                                id="personality" 
+                                name="personality" 
+                                class="form-textarea" 
+                                placeholder="How do you like to communicate? Are you formal/casual, funny/serious, direct/empathetic?"
+                                maxlength="500"
+                            ></textarea>
+                            <div class="char-counter">
+                                <span id="personality-count">0</span>/500 characters
+                            </div>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save"></i> Save Information
+                        </button>
+                    </form>
+                </div>
+            </div>
+            
+            <!-- Document Upload Panel -->
+            <div class="knowledge-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Upload Documents</div>
+                    <div class="panel-subtitle">Add PDF and Word documents for enhanced knowledge</div>
+                </div>
+                <div class="panel-body">
+                    <div class="upload-area" id="upload-area">
+                        <div class="upload-icon">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                        </div>
+                        <div class="upload-text">
+                            Drop your documents here
+                        </div>
+                        <div class="upload-hint">
+                            Supports PDF, DOC, and DOCX files up to 10MB each
+                        </div>
+                        <button type="button" class="btn btn-primary" id="browse-btn">
+                            <i class="fas fa-folder-open"></i> Browse Files
+                        </button>
+                        <input type="file" id="file-input" class="file-input" multiple accept=".pdf,.doc,.docx">
+                    </div>
+                    
+                    <!-- Progress bar -->
+                    <div class="progress-bar" id="progress-bar" style="display: none;">
+                        <div class="progress-fill" id="progress-fill"></div>
+                    </div>
+                    
+                    <!-- File list -->
+                    <div class="file-list" id="file-list"></div>
+                    
+                    <div class="knowledge-stats">
+                        <div class="stat-item">
+                            <div class="stat-number" id="doc-count">0</div>
+                            <div class="stat-label">Documents</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number" id="total-size">0MB</div>
+                            <div class="stat-label">Total Size</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number" id="knowledge-score">0%</div>
+                            <div class="stat-label">Completeness</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Knowledge Preview -->
+        <div class="knowledge-preview" id="knowledge-preview" style="display: none;">
+            <div class="preview-title">
+                <i class="fas fa-eye"></i> Knowledge Preview
+            </div>
+            <div class="preview-content" id="preview-content">
+                Your knowledge base will appear here once you add information and documents.
+            </div>
+        </div>
+    </main>
+
+    <!-- Load shared scripts -->
+    <script src="../js/config.js"></script>
+    <script src="../js/utils.js"></script>
+    <script src="../js/api-client.js"></script>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Enforce authentication
+            const token = localStorage.getItem('token');
+            const userStr = localStorage.getItem('user');
+            
+            if (!token || !userStr) {
+                window.location.href = '../pages/login.html';
+                return;
+            }
+            
+            const user = JSON.parse(userStr);
+            
+            if (user.userType !== 'influencer') {
+                window.location.href = '../pages/login.html';
+                return;
+            }
+            
+            // Update user display
+            if (user) {
+                const userName = document.getElementById('user-name');
+                const userAvatar = document.getElementById('user-avatar');
+                
+                if (userName) userName.textContent = user.username;
+                
+                if (userAvatar && user.username) {
+                    const initials = user.username.split(' ')
+                        .map(name => name[0])
+                        .join('')
+                        .toUpperCase()
+                        .substring(0, 2);
+                    userAvatar.textContent = initials;
+                }
+            }
+            
+            // Set preview chat link
+            const previewChatLink = document.getElementById('preview-chat-link');
+            if (previewChatLink && user.username && window.ChatLinkManager) {
+                const chatLink = window.ChatLinkManager.generateChatUrl(user.username);
+                previewChatLink.href = chatLink;
+            }
+            
+            // DOM elements
+            const uploadArea = document.getElementById('upload-area');
+            const fileInput = document.getElementById('file-input');
+            const browseBtn = document.getElementById('browse-btn');
+            const fileList = document.getElementById('file-list');
+            const progressBar = document.getElementById('progress-bar');
+            const progressFill = document.getElementById('progress-fill');
+            const personalInfoForm = document.getElementById('personal-info-form');
+            const logoutBtn = document.getElementById('logout-btn');
+            
+            // Character counters
+            const bioTextarea = document.getElementById('bio');
+            const expertiseTextarea = document.getElementById('expertise');
+            const personalityTextarea = document.getElementById('personality');
+            
+            let uploadedFiles = [];
+            
+            // Initialize page
+            init();
+            
+            async function init() {
+                try {
+                    await loadExistingKnowledge();
+                    updateKnowledgeStats();
+                } catch (error) {
+                    console.error('Initialization error:', error);
+                    showAlert('Failed to load existing knowledge', 'error');
+                }
+            }
+            
+            // Load existing knowledge data
+            async function loadExistingKnowledge() {
+                try {
+                    // Load personal information from profile
+                    const profileResponse = await fetch(`${CONFIG.API.BASE_URL}/influencer/profile`, {
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+                    
+                    const profileData = await profileResponse.json();
+                    
+                    if (profileData.status === 'success' && profileData.data) {
+                        // Load existing text information
+                        if (profileData.data.bio) {
+                            document.getElementById('bio').value = profileData.data.bio;
+                            updateCharCount('bio');
+                        }
+                        if (profileData.data.expertise) {
+                            document.getElementById('expertise').value = profileData.data.expertise;
+                            updateCharCount('expertise');
+                        }
+                        if (profileData.data.personality) {
+                            document.getElementById('personality').value = profileData.data.personality;
+                            updateCharCount('personality');
+                        }
+                    }
+                    
+                    // FIXED: Load documents from separate endpoint
+                    try {
+                        const documentsResponse = await fetch(`${CONFIG.API.BASE_URL}/knowledge/documents`, {
+                            headers: {
+                                'Authorization': `Bearer ${token}`
+                            }
+                        });
+                        
+                        const documentsData = await documentsResponse.json();
+                        
+                        if (documentsData.status === 'success' && documentsData.data.documents) {
+                            // Convert database format to frontend format
+                            uploadedFiles = documentsData.data.documents.map(doc => ({
+                                id: doc.id,
+                                name: doc.name,
+                                size: doc.size,
+                                type: doc.type,
+                                status: doc.status,
+                                document_id: doc.document_id,
+                                processed: doc.processed,
+                                chunk_count: doc.chunk_count || 0
+                            }));
+                            
+                            renderFileList();
+                            updateKnowledgeStats();
+                            
+                            console.log(`📚 Loaded ${uploadedFiles.length} existing documents`);
+                            
+                            // Show success message if documents exist
+                            if (uploadedFiles.length > 0) {
+                                showAlert(`Found ${uploadedFiles.length} uploaded documents`, 'success', 3000);
+                            }
+                        }
+                    } catch (docError) {
+                        console.error('Error loading documents:', docError);
+                        console.log('📝 No existing documents found (this is normal for new users)');
+                    }
+                    
+                } catch (error) {
+                    console.error('Error loading knowledge:', error);
+                }
+            }
+            
+            // Character counting
+            function setupCharCounting() {
+                [bioTextarea, expertiseTextarea, personalityTextarea].forEach(textarea => {
+                    if (textarea) {
+                        textarea.addEventListener('input', () => updateCharCount(textarea.id));
+                        updateCharCount(textarea.id);
+                    }
+                });
+            }
+            
+            function updateCharCount(textareaId) {
+                const textarea = document.getElementById(textareaId);
+                const counter = document.getElementById(`${textareaId}-count`);
+                if (textarea && counter) {
+                    counter.textContent = textarea.value.length;
+                }
+            }
+            
+            // File upload handling
+            browseBtn.addEventListener('click', () => fileInput.click());
+            
+            fileInput.addEventListener('change', (e) => {
+                handleFiles(e.target.files);
+            });
+            
+            // Drag and drop
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+            
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('dragover');
+            });
+            
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                handleFiles(e.dataTransfer.files);
+            });
+            
+            function handleFiles(files) {
+                const validFiles = Array.from(files).filter(validateFile);
+                
+                if (validFiles.length === 0) {
+                    showAlert('Please select valid PDF, DOC, or DOCX files', 'error');
+                    return;
+                }
+                
+                validFiles.forEach(uploadFile);
+            }
+            
+            function validateFile(file) {
+                const allowedTypes = [
+                    'application/pdf',
+                    'application/msword',
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                ];
+                const maxSize = 10 * 1024 * 1024; // 10MB
+                
+                if (!allowedTypes.includes(file.type)) {
+                    showAlert(`${file.name}: Only PDF, DOC, and DOCX files are allowed`, 'error');
+                    return false;
+                }
+                
+                if (file.size > maxSize) {
+                    showAlert(`${file.name}: File size must be less than 10MB`, 'error');
+                    return false;
+                }
+                
+                return true;
+            }
+            
+        async function uploadFile(file) {
+            const fileId = Date.now() + Math.random();
+            const fileItem = {
+                id: fileId,
+                name: file.name,
+                size: file.size,
+                type: file.type,
+                status: 'uploading',
+                progress: 0
+            };
+            
+            uploadedFiles.push(fileItem);
+            renderFileList();
+            updateKnowledgeStats();
+            
+            try {
+                showProgress(true);
+                
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('type', 'knowledge_document');
+                
+                const response = await fetch(`${CONFIG.API.BASE_URL}/knowledge/upload`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.status === 'success') {
+                    fileItem.status = 'completed';
+                    fileItem.document_id = data.data.document_id;
+                    showAlert(`${file.name} uploaded successfully`, 'success');
+                } else {
+                    fileItem.status = 'error';
+                    showAlert(`Failed to upload ${file.name}: ${data.message || 'Unknown error'}`, 'error');
+                }
+                
+            } catch (error) {
+                console.error('Upload error:', error);
+                fileItem.status = 'error';
+                showAlert(`Failed to upload ${file.name}`, 'error');
+            } finally {
+                showProgress(false);
+                renderFileList();
+                updateKnowledgeStats();
+            }
+        }
+            
+            function renderFileList() {
+                fileList.innerHTML = '';
+                
+                uploadedFiles.forEach(file => {
+                    const fileItem = document.createElement('div');
+                    fileItem.className = 'file-item';
+                    
+                    const statusIcon = getStatusIcon(file.status);
+                    const fileIcon = getFileIcon(file.type);
+                    
+                    fileItem.innerHTML = `
+                        <div class="file-info">
+                            <div class="file-icon">${fileIcon}</div>
+                            <div class="file-details">
+                                <div class="file-name">${file.name}</div>
+                                <div class="file-size">${formatFileSize(file.size)} ${statusIcon}</div>
+                            </div>
+                        </div>
+                        <div class="file-actions">
+                            ${file.status === 'completed' ? '<button class="btn btn-small btn-secondary" onclick="viewFile(' + file.id + ')"><i class="fas fa-eye"></i></button>' : ''}
+                            <button class="btn btn-small btn-danger" onclick="removeFile(${file.id})">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    `;
+                    
+                    fileList.appendChild(fileItem);
+                });
+            }
+            
+            function getFileIcon(type) {
+                if (type === 'application/pdf') {
+                    return '<i class="fas fa-file-pdf"></i>';
+                } else if (type.includes('word')) {
+                    return '<i class="fas fa-file-word"></i>';
+                }
+                return '<i class="fas fa-file"></i>';
+            }
+            
+            function getStatusIcon(status) {
+                switch (status) {
+                    case 'uploading':
+                        return '<i class="fas fa-spinner fa-spin" style="color: #f59e0b;"></i>';
+                    case 'completed':
+                        return '<i class="fas fa-check-circle" style="color: #10b981;"></i>';
+                    case 'error':
+                        return '<i class="fas fa-exclamation-circle" style="color: #ef4444;"></i>';
+                    default:
+                        return '';
+                }
+            }
+            
+            function formatFileSize(bytes) {
+                if (bytes === 0) return '0 B';
+                const k = 1024;
+                const sizes = ['B', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+            }
+            
+            // Progress handling
+            function showProgress(show) {
+                progressBar.style.display = show ? 'block' : 'none';
+                if (!show) {
+                    progressFill.style.width = '0%';
+                }
+            }
+            
+            function updateProgress(percentage) {
+                progressFill.style.width = percentage + '%';
+            }
+            
+            // File management
+            window.removeFile = function(fileId) {
+                uploadedFiles = uploadedFiles.filter(file => file.id !== fileId);
+                renderFileList();
+                updateKnowledgeStats();
+                showAlert('File removed', 'info');
+            };
+            
+            window.viewFile = function(fileId) {
+                const file = uploadedFiles.find(f => f.id === fileId);
+                if (file && file.url) {
+                    window.open(file.url, '_blank');
+                }
+            };
+            
+            // Update knowledge statistics
+            function updateKnowledgeStats() {
+                const docCount = uploadedFiles.filter(f => f.status === 'completed').length;
+                const totalSize = uploadedFiles.reduce((sum, file) => sum + file.size, 0);
+                const completeness = calculateCompleteness();
+                
+                document.getElementById('doc-count').textContent = docCount;
+                document.getElementById('total-size').textContent = formatFileSize(totalSize);
+                document.getElementById('knowledge-score').textContent = completeness + '%';
+            }
+            
+            function calculateCompleteness() {
+                let score = 0;
+                
+                // Text information (60% of total)
+                if (document.getElementById('bio').value.trim()) score += 20;
+                if (document.getElementById('expertise').value.trim()) score += 20;
+                if (document.getElementById('personality').value.trim()) score += 20;
+                
+                // Documents (40% of total)
+                const completedDocs = uploadedFiles.filter(f => f.status === 'completed').length;
+                if (completedDocs > 0) score += Math.min(40, completedDocs * 10);
+                
+                return Math.min(100, score);
+            }
+            
+            // Form submission
+            personalInfoForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                const formData = {
+                    bio: document.getElementById('bio').value.trim(),
+                    expertise: document.getElementById('expertise').value.trim(),
+                    personality: document.getElementById('personality').value.trim()
+                };
+                
+                try {
+                    const response = await fetch(`${CONFIG.API.BASE_URL}/knowledge/personal-info`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(formData)
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.status === 'success') {
+                        showAlert('Personal information saved successfully', 'success');
+                        updateKnowledgeStats();
+                        updateKnowledgePreview();
+                    } else {
+                        showAlert(data.message || 'Failed to save information', 'error');
+                    }
+                } catch (error) {
+                    console.error('Save error:', error);
+                    showAlert('Failed to save information', 'error');
+                }
+            });
+            
+            // Update knowledge preview
+            function updateKnowledgePreview() {
+                const bio = document.getElementById('bio').value.trim();
+                const expertise = document.getElementById('expertise').value.trim();
+                const personality = document.getElementById('personality').value.trim();
+                const docCount = uploadedFiles.filter(f => f.status === 'completed').length;
+                
+                if (bio || expertise || personality || docCount > 0) {
+                    let preview = '';
+                    if (bio) preview += `Bio: ${bio.substring(0, 100)}...\n\n`;
+                    if (expertise) preview += `Expertise: ${expertise.substring(0, 100)}...\n\n`;
+                    if (personality) preview += `Style: ${personality.substring(0, 100)}...\n\n`;
+                    if (docCount > 0) preview += `Plus ${docCount} uploaded document(s) for enhanced knowledge.`;
+                    
+                    document.getElementById('preview-content').textContent = preview;
+                    document.getElementById('knowledge-preview').style.display = 'block';
+                } else {
+                    document.getElementById('knowledge-preview').style.display = 'none';
+                }
+            }
+            
+            // Alert system
+            function showAlert(message, type = 'info', duration = 5000) {
+                const alert = document.getElementById('alert');
+                alert.textContent = message;
+                alert.className = `alert ${type}`;
+                alert.style.display = 'block';
+                
+                setTimeout(() => {
+                    alert.style.display = 'none';
+                }, duration);
+            }
+            
+            // Setup character counting
+            setupCharCounting();
+            
+            // Monitor for changes to update preview
+            [bioTextarea, expertiseTextarea, personalityTextarea].forEach(textarea => {
+                if (textarea) {
+                    textarea.addEventListener('input', updateKnowledgePreview);
+                }
+            });
+            
+            // Logout functionality
+            logoutBtn.addEventListener('click', function() {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = '../pages/login.html';
+            });
+        });
+    </script>
+</body>
+</html>

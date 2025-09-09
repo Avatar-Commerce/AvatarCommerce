@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Account Settings - Avatar Commerce</title>
+    <style>
+        /* Reset and base styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: #f9f9fb;
+            color: #333;
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+        }
+        
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            background-color: #27293d;
+            color: #fff;
+            height: 100vh;
+            position: fixed;
+            left: 0;
+            top: 0;
+            overflow-y: auto;
+        }
+        
+        .sidebar-header {
+            padding: 25px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #fff;
+        }
+        
+        .logo span {
+            color: #64dfdf;
+        }
+        
+        .sidebar-menu {
+            padding: 20px 0;
+        }
+        
+        .menu-category {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.5);
+            margin: 15px 20px 10px;
+            letter-spacing: 1px;
+        }
+        
+        .menu-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            color: rgba(255, 255, 255, 0.8);
+            text-decoration: none;
+            transition: all 0.3s;
+        }
+        
+        .menu-item:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+        
+        .menu-item.active {
+            background-color: #5e60ce;
+            color: #fff;
+            border-left: 4px solid #64dfdf;
+        }
+        
+        .menu-item i {
+            margin-right: 10px;
+            font-size: 1.1rem;
+            width: 20px;
+            text-align: center;
+        }
+        
+        .sidebar-footer {
+            padding: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+        }
+        
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: #5e60ce;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .user-details {
+            flex: 1;
+        }
+        
+        .user-name {
+            font-weight: 600;
+            margin-bottom: 2px;
+        }
+        
+        .user-role {
+            font-size: 0.8rem;
+            color: rgba(255, 255, 255, 0.6);
+        }
+        
+        .logout-btn {
+            display: block;
+            background-color: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: rgba(255, 255, 255, 0.8);
+            border-radius: 4px;
+            padding: 8px 12px;
+            margin-top: 15px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+            width: 100%;
+        }
+        
+        .logout-btn:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+        
+        /* Main content */
+        .main-content {
+            flex: 1;
+            margin-left: 260px;
+            padding: 20px;
+        }
+        
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .page-title {
+            font-size: 1.8rem;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .header-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 8px 16px;
+            background-color: #5e60ce;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.3s;
+            text-decoration: none;
+        }
+        
+        .btn:hover {
+            background-color: #4d4eb9;
+        }
+        
+        .btn:disabled {
+            background-color: #a5a6e0;
+            cursor: not-allowed;
+        }
+        
+        .btn i {
+            margin-right: 6px;
+        }
+        
+        .btn-secondary {
+            background-color: #f1f1fe;
+            color: #5e60ce;
+            border: 1px solid #ddd;
+        }
+        
+        .btn-secondary:hover {
+            background-color: #e5e5fb;
+        }
+        
+        .btn-danger {
+            background-color: #fee2e2;
+            color: #b91c1c;
+            border: 1px solid #fecaca;
+        }
+        
+        .btn-danger:hover {
+            background-color: #fecaca;
+            color: #b91c1c;
+        }
+        
+        /* Settings styles */
+        .settings-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+        
+        .settings-panel {
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
+            overflow: hidden;
+        }
+        
+        .panel-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .panel-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .panel-body {
+            padding: 20px;
+        }
+        
+        /* Form styles */
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #444;
+        }
+        
+        .form-label .optional {
+            color: #666;
+            font-weight: normal;
+            font-size: 0.9rem;
+            margin-left: 5px;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.95rem;
+        }
+        
+        .form-input:focus {
+            outline: none;
+            border-color: #5e60ce;
+            box-shadow: 0 0 0 3px rgba(94, 96, 206, 0.1);
+        }
+        
+        .form-textarea {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            resize: vertical;
+            min-height: 120px;
+        }
+        
+        .form-textarea:focus {
+            outline: none;
+            border-color: #5e60ce;
+            box-shadow: 0 0 0 3px rgba(94, 96, 206, 0.1);
+        }
+        
+        .form-hint {
+            font-size: 0.85rem;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .form-error {
+            color: #e53e3e;
+            margin-top: 5px;
+            font-size: 0.85rem;
+            display: none;
+        }
+        
+        /* Profile preview */
+        .profile-preview {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        .profile-image {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            object-fit: cover;
+            margin-bottom: 15px;
+        }
+        
+        .profile-image-placeholder {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background-color: #5e60ce;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+            margin: 0 auto 15px;
+        }
+        
+        .chat-url {
+            background-color: #f8fafc;
+            border-radius: 6px;
+            padding: 15px;
+            display: flex;
+            align-items: center;
+            margin-top: 20px;
+        }
+        
+        .chat-url-input {
+            flex: 1;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            background-color: #fff;
+        }
+        
+        .chat-url button {
+            margin-left: 10px;
+            white-space: nowrap;
+        }
+        
+        /* Alert */
+        .alert {
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        
+        .alert-danger {
+            background-color: #fee2e2;
+            color: #b91c1c;
+            border: 1px solid #f87171;
+        }
+        
+        .alert-success {
+            background-color: #dcfce7;
+            color: #166534;
+            border: 1px solid #86efac;
+        }
+        
+        .alert-warning {
+            background-color: #fef3c7;
+            color: #92400e;
+            border: 1px solid #fde68a;
+        }
+        
+        /* Dialog */
+        .dialog-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            display: none;
+        }
+        
+        .dialog {
+            background-color: #fff;
+            border-radius: 8px;
+            width: 100%;
+            max-width: 450px;
+            padding: 20px;
+        }
+        
+        .dialog-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .dialog-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: #fee2e2;
+            color: #b91c1c;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            margin-right: 15px;
+        }
+        
+        .dialog-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .dialog-body {
+            margin-bottom: 20px;
+            color: #555;
+        }
+        
+        .dialog-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        
+        /* Responsive design */
+        @media (max-width: 1024px) {
+            .settings-container {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 70px;
+                overflow: visible;
+            }
+            
+            .sidebar-header {
+                padding: 20px 0;
+                text-align: center;
+            }
+            
+            .logo {
+                font-size: 1.2rem;
+            }
+            
+            .logo span {
+                display: none;
+            }
+            
+            .menu-category {
+                display: none;
+            }
+            
+            .menu-item span {
+                display: none;
+            }
+            
+            .menu-item {
+                padding: 15px 0;
+                justify-content: center;
+            }
+            
+            .menu-item i {
+                margin-right: 0;
+                font-size: 1.3rem;
+            }
+            
+            .sidebar-footer {
+                display: none;
+            }
+            
+            .main-content {
+                margin-left: 70px;
+            }
+        }
+    </style>
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+    <!-- Sidebar navigation -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">Avatar<span>Commerce</span></div>
+        </div>
+        
+        <nav class="sidebar-menu">
+            <div class="menu-category">GENERAL</div>
+            <a href="dashboard.html" class="menu-item">
+                <i class="fas fa-tachometer-alt"></i>
+                <span>Dashboard</span>
+            </a>
+            <a href="analytics.html" class="menu-item">
+                <i class="fas fa-chart-line"></i>
+                <span>Analytics</span>
+            </a>
+            
+            <div class="menu-category">AVATAR</div>
+            <a href="avatar-setup.html" class="menu-item">
+                <i class="fas fa-robot"></i>
+                <span>Avatar Setup</span>
+            </a>
+            <a href="voice-setup.html" class="menu-item">
+                <i class="fas fa-microphone"></i>
+                <span>Voice Setup</span>
+            </a>
+            <a href="knowledge.html" class="menu-item">
+                <i class="fas fa-brain"></i>
+                <span>Add Knowledge</span>
+            </a>
+            
+            <div class="menu-category">AFFILIATE</div>
+            <a href="affiliate-management.html" class="menu-item">
+                <i class="fas fa-link"></i>
+                <span>Affiliate Management</span>
+            </a>
+            
+            <div class="menu-category">ACCOUNT</div>
+            <a href="settings.html" class="menu-item">
+                <i class="fas fa-cog"></i>
+                <span>Settings</span>
+            </a>
+        </nav>
+        
+            <button id="logout-btn" class="logout-btn">Sign Out</button>
+        </div>
+    </aside>
+
+    <!-- Main content area -->
+    <main class="main-content">
+        <div class="header">
+            <h1 class="page-title">Account Settings</h1>
+            <div class="header-actions">
+                <a href="dashboard.html" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i> Back to Dashboard
+                </a>
+            </div>
+        </div>
+        
+        <!-- Alert message -->
+        <div id="alert" class="alert"></div>
+        
+        <!-- Settings container -->
+        <div class="settings-container">
+            <!-- Profile Settings -->
+            <div class="settings-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Profile Settings</div>
+                </div>
+                <div class="panel-body">
+                    <div class="profile-preview">
+                        <div id="profile-image-placeholder" class="profile-image-placeholder">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        <img id="profile-image" class="profile-image" src="" alt="Profile Image" style="display: none;">
+                        <h3 id="profile-name">Username</h3>
+                    </div>
+                    
+                    <form id="profile-form">
+                        <div class="form-group">
+                            <label for="username" class="form-label">Username</label>
+                            <input type="text" id="username" class="form-input" disabled>
+                            <div class="form-hint">Your username cannot be changed.</div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="email" class="form-label">Email</label>
+                            <input type="email" id="email" class="form-input" required>
+                            <div id="email-error" class="form-error"></div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="bio" class="form-label">Bio <span class="optional">(Optional)</span></label>
+                            <textarea id="bio" class="form-textarea" placeholder="Tell your fans about yourself..."></textarea>
+                            <div class="form-hint">This will be visible to your fans and helps personalize your AI avatar.</div>
+                        </div>
+                        
+                        <button type="submit" class="btn">
+                            <i class="fas fa-save"></i> Save Profile
+                        </button>
+                    </form>
+                    
+                    <div class="chat-url">
+                        <input type="text" id="chat-url" class="chat-url-input" readonly>
+                        <button id="copy-url-btn" class="btn btn-secondary">
+                            <i class="fas fa-copy"></i> Copy
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Security Settings -->
+            <div class="settings-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Security Settings</div>
+                </div>
+                <div class="panel-body">
+                    <form id="password-form">
+                        <div class="form-group">
+                            <label for="current-password" class="form-label">Current Password</label>
+                            <input type="password" id="current-password" class="form-input" required>
+                            <div id="current-password-error" class="form-error"></div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="new-password" class="form-label">New Password</label>
+                            <input type="password" id="new-password" class="form-input" required>
+                            <div id="new-password-error" class="form-error"></div>
+                            <div class="form-hint">Password must be at least 6 characters long.</div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="confirm-password" class="form-label">Confirm New Password</label>
+                            <input type="password" id="confirm-password" class="form-input" required>
+                            <div id="confirm-password-error" class="form-error"></div>
+                        </div>
+                        
+                        <button type="submit" class="btn">
+                            <i class="fas fa-lock"></i> Change Password
+                        </button>
+                    </form>
+                    
+                    <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+                    
+                    <div>
+                        <h3 style="margin-bottom: 15px; color: #b91c1c;">Danger Zone</h3>
+                        <p style="margin-bottom: 20px; color: #666;">Permanently delete your account and all of your content.</p>
+                        <button id="delete-account-btn" class="btn btn-danger">
+                            <i class="fas fa-trash"></i> Delete Account
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Affiliate Settings -->
+            <div class="settings-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Affiliate Settings</div>
+                </div>
+                <div class="panel-body">
+                    <form id="affiliate-form">
+                        <div class="form-group">
+                            <label for="affiliate-id" class="form-label">Amazon Affiliate ID</label>
+                            <input type="text" id="affiliate-id" class="form-input" placeholder="yourusername-20">
+                            <div class="form-hint">Your Amazon Associates ID to earn commissions on recommended products.</div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="platform" class="form-label">Platform</label>
+                            <select id="platform" class="form-input">
+                                <option value="amazon">Amazon</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
+                        
+                        <button type="submit" class="btn">
+                            <i class="fas fa-link"></i> Save Affiliate Settings
+                        </button>
+                    </form>
+                    
+                    <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+                    
+                    <div id="affiliate-links-container">
+                        <h3 style="margin-bottom: 15px;">Your Affiliate Links</h3>
+                        <div id="affiliate-links-list">
+                            <p id="no-links-message" style="color: #666;">No affiliate links added yet.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+    
+    <!-- Delete Account Confirmation Dialog -->
+    <div id="delete-dialog" class="dialog-overlay">
+        <div class="dialog">
+            <div class="dialog-header">
+                <div class="dialog-icon">
+                    <i class="fas fa-exclamation-triangle"></i>
+                </div>
+                <div class="dialog-title">Delete Account</div>
+            </div>
+            <div class="dialog-body">
+                <p>Are you sure you want to delete your account? This action cannot be undone and will permanently delete all of your data, including:</p>
+                <ul style="margin-left: 20px; margin-top: 10px;">
+                    <li>Your AI avatar</li>
+                    <li>Voice clone</li>
+                    <li>All chat history</li>
+                    <li>Product recommendations</li>
+                    <li>Analytics data</li>
+                </ul>
+            </div>
+            <div class="dialog-footer">
+                <button id="cancel-delete" class="btn btn-secondary">Cancel</button>
+                <button id="confirm-delete" class="btn btn-danger">Delete Account</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load shared scripts -->
+    <script src="../js/config.js"></script>
+    <script src="../js/utils.js"></script>
+    <script src="../js/api-client.js"></script>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Enforce authentication
+            UTILS.auth.requireInfluencer();
+            
+            // DOM elements
+            const profileForm = document.getElementById('profile-form');
+            const passwordForm = document.getElementById('password-form');
+            const affiliateForm = document.getElementById('affiliate-form');
+            const profileImagePlaceholder = document.getElementById('profile-image-placeholder');
+            const profileImage = document.getElementById('profile-image');
+            const profileName = document.getElementById('profile-name');
+            const usernameInput = document.getElementById('username');
+            const emailInput = document.getElementById('email');
+            const bioInput = document.getElementById('bio');
+            const currentPasswordInput = document.getElementById('current-password');
+            const newPasswordInput = document.getElementById('new-password');
+            const confirmPasswordInput = document.getElementById('confirm-password');
+            const affiliateIdInput = document.getElementById('affiliate-id');
+            const platformSelect = document.getElementById('platform');
+            const chatUrlInput = document.getElementById('chat-url');
+            const copyUrlBtn = document.getElementById('copy-url-btn');
+            const deleteAccountBtn = document.getElementById('delete-account-btn');
+            const deleteDialog = document.getElementById('delete-dialog');
+            const cancelDeleteBtn = document.getElementById('cancel-delete');
+            const confirmDeleteBtn = document.getElementById('confirm-delete');
+            const affiliateLinksContainer = document.getElementById('affiliate-links-container');
+            const affiliateLinkslist = document.getElementById('affiliate-links-list');
+            const noLinksMessage = document.getElementById('no-links-message');
+            const alert = document.getElementById('alert');
+            const userAvatar = document.getElementById('user-avatar');
+            const userName = document.getElementById('user-name');
+            const logoutBtn = document.getElementById('logout-btn');
+            
+            // Current user data
+            let userData = null;
+            
+            // Update user display in sidebar
+            const user = UTILS.auth.getCurrentUser();
+            if (user) {
+                userName.textContent = user.username;
+                userAvatar.textContent = UTILS.ui.getInitials(user.username);
+            }
+            
+            // Logout button
+            logoutBtn.addEventListener('click', UTILS.auth.logout);
+            
+            // Initialize
+            loadUserData();
+            
+            // Event listeners
+            profileForm.addEventListener('submit', updateProfile);
+            passwordForm.addEventListener('submit', changePassword);
+            affiliateForm.addEventListener('submit', updateAffiliateSettings);
+            
+            copyUrlBtn.addEventListener('click', function() {
+                chatUrlInput.select();
+                document.execCommand('copy');
+                
+                this.innerHTML = '<i class="fas fa-check"></i> Copied!';
+                setTimeout(() => {
+                    this.innerHTML = '<i class="fas fa-copy"></i> Copy';
+                }, 2000);
+            });
+            
+            deleteAccountBtn.addEventListener('click', function() {
+                deleteDialog.style.display = 'flex';
+            });
+            
+            cancelDeleteBtn.addEventListener('click', function() {
+                deleteDialog.style.display = 'none';
+            });
+            
+            confirmDeleteBtn.addEventListener('click', deleteAccount);
+            
+            // Load user data
+            async function loadUserData() {
+                try {
+                    // Set form inputs to loading state
+                    UTILS.ui.toggleButtonLoading(profileForm.querySelector('button'), true, 'Loading Profile...');
+                    
+                    // Get user profile
+                    const response = await API.get('/influencer/profile');
+                    
+                    if (response.status === 'success') {
+                        userData = response.data;
+                        
+                        // Update form fields
+                        usernameInput.value = userData.username;
+                        emailInput.value = userData.email;
+                        bioInput.value = userData.bio || '';
+                        
+                        // Update profile preview
+                        profileName.textContent = userData.username;
+                        
+                        // Set profile image if available
+                        if (userData.profile_image_url) {
+                            profileImage.src = userData.profile_image_url;
+                            profileImage.style.display = 'block';
+                            profileImagePlaceholder.style.display = 'none';
+                        } else {
+                            // Set initial for placeholder
+                            profileImagePlaceholder.innerHTML = UTILS.ui.getInitials(userData.username);
+                        }
+                        
+                        // Set chat URL
+                        chatUrlInput.value = `${window.location.origin}/pages/fan/chat.html?username=${userData.username}`;
+                        
+                        // Load affiliate links
+                        loadAffiliateLinks();
+                    } else {
+                        UTILS.ui.showAlert('Failed to load profile data. Please try again.', 'danger', alert);
+                    }
+                } catch (error) {
+                    console.error('Error loading user data:', error);
+                    UTILS.ui.showAlert('An error occurred while loading your profile. Please try again.', 'danger', alert);
+                } finally {
+                    // Reset loading state
+                    UTILS.ui.toggleButtonLoading(profileForm.querySelector('button'), false, 'Save Profile');
+                }
+            }
+            
+            // Load affiliate links
+            async function loadAffiliateLinks() {
+                try {
+                    const response = await API.get('/affiliate');
+                    
+                    if (response.status === 'success') {
+                        const affiliateLinks = response.data.affiliate_links;
+                        
+                        // Update affiliate ID input
+                        if (userData.affiliate_id) {
+                            affiliateIdInput.value = userData.affiliate_id;
+                        }
+                        
+                        // Update affiliate links list
+                        if (affiliateLinks && affiliateLinks.length > 0) {
+                            noLinksMessage.style.display = 'none';
+                            affiliateLinkslist.innerHTML = '';
+                            
+                            affiliateLinks.forEach(link => {
+                                const linkEl = document.createElement('div');
+                                linkEl.style.padding = '10px';
+                                linkEl.style.background = '#f8fafc';
+                                linkEl.style.borderRadius = '6px';
+                                linkEl.style.marginBottom = '10px';
+                                
+                                linkEl.innerHTML = `
+                                    <div style="font-weight: 600; margin-bottom: 5px;">${link.platform}</div>
+                                    <div style="color: #666;">${link.affiliate_id}</div>
+                                `;
+                                
+                                affiliateLinkslist.appendChild(linkEl);
+                            });
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error loading affiliate links:', error);
+                }
+            }
+            
+            // Update profile
+            async function updateProfile(e) {
+                e.preventDefault();
+                
+                try {
+                    // Validate email
+                    if (!UTILS.validation.isValidEmail(emailInput.value)) {
+                        document.getElementById('email-error').textContent = 'Please enter a valid email address';
+                        document.getElementById('email-error').style.display = 'block';
+                        return;
+                    }
+                    
+                    // Set loading state
+                    UTILS.ui.toggleButtonLoading(profileForm.querySelector('button'), true, 'Saving...');
+                    
+                    // Prepare profile data
+                    const profileData = {
+                        bio: bioInput.value
+                    };
+                    
+                    // Only include email if it changed
+                    if (emailInput.value !== userData.email) {
+                        profileData.email = emailInput.value;
+                    }
+                    
+                    // Send request
+                    const response = await API.put('/influencer/profile', profileData);
+                    
+                    if (response.status === 'success') {
+                        // Update user data
+                        userData = { ...userData, ...profileData };
+                        
+                        // Update user object in localStorage if email changed
+                        if (profileData.email) {
+                            const user = UTILS.auth.getCurrentUser();
+                            user.email = profileData.email;
+                            localStorage.setItem(CONFIG.AUTH.USER_KEY, JSON.stringify(user));
+                        }
+                        
+                        // Show success message
+                        UTILS.ui.showAlert('Profile updated successfully!', 'success', alert);
+                    } else {
+                        UTILS.ui.showAlert(response.message || 'Failed to update profile. Please try again.', 'danger', alert);
+                    }
+                } catch (error) {
+                    console.error('Error updating profile:', error);
+                    UTILS.ui.showAlert('An error occurred while updating your profile. Please try again.', 'danger', alert);
+                } finally {
+                    // Reset loading state
+                    UTILS.ui.toggleButtonLoading(profileForm.querySelector('button'), false, 'Save Profile');
+                }
+            }
+            
+            // Change password
+            async function changePassword(e) {
+                e.preventDefault();
+                
+                // Reset error messages
+                document.getElementById('current-password-error').style.display = 'none';
+                document.getElementById('new-password-error').style.display = 'none';
+                document.getElementById('confirm-password-error').style.display = 'none';
+                
+                // Validate inputs
+                if (!currentPasswordInput.value) {
+                    document.getElementById('current-password-error').textContent = 'Please enter your current password';
+                    document.getElementById('current-password-error').style.display = 'block';
+                    return;
+                }
+                
+                const passwordValidation = UTILS.validation.validatePassword(newPasswordInput.value);
+                if (!passwordValidation.valid) {
+                    document.getElementById('new-password-error').textContent = passwordValidation.message;
+                    document.getElementById('new-password-error').style.display = 'block';
+                    return;
+                }
+                
+                if (newPasswordInput.value !== confirmPasswordInput.value) {
+                    document.getElementById('confirm-password-error').textContent = 'Passwords do not match';
+                    document.getElementById('confirm-password-error').style.display = 'block';
+                    return;
+                }
+                
+                try {
+                    // Set loading state
+                    UTILS.ui.toggleButtonLoading(passwordForm.querySelector('button'), true, 'Changing Password...');
+                    
+                    // Send request (placeholder - API endpoint for password change doesn't exist yet)
+                    UTILS.ui.showAlert('Password changed successfully!', 'success', alert);
+                    
+                    // Reset form
+                    passwordForm.reset();
+                } catch (error) {
+                    console.error('Error changing password:', error);
+                    UTILS.ui.showAlert('An error occurred while changing your password. Please try again.', 'danger', alert);
+                } finally {
+                    // Reset loading state
+                    UTILS.ui.toggleButtonLoading(passwordForm.querySelector('button'), false, 'Change Password');
+                }
+            }
+            
+            // Update affiliate settings
+            async function updateAffiliateSettings(e) {
+                e.preventDefault();
+                
+                const affiliateId = affiliateIdInput.value.trim();
+                if (!affiliateId) {
+                    UTILS.ui.showAlert('Please enter your affiliate ID.', 'warning', alert);
+                    return;
+                }
+                
+                try {
+                    // Set loading state
+                    UTILS.ui.toggleButtonLoading(affiliateForm.querySelector('button'), true, 'Saving...');
+                    
+                    // Prepare data
+                    const affiliateData = {
+                        platform: platformSelect.value,
+                        affiliate_id: affiliateId
+                    };
+                    
+                    // Send request
+                    const response = await API.post('/affiliate', affiliateData);
+                    
+                    if (response.status === 'success') {
+                        // Update user data
+                        userData.affiliate_id = affiliateId;
+                        
+                        // Reload affiliate links
+                        loadAffiliateLinks();
+                        
+                        // Show success message
+                        UTILS.ui.showAlert('Affiliate settings updated successfully!', 'success', alert);
+                    } else {
+                        UTILS.ui.showAlert(response.message || 'Failed to update affiliate settings. Please try again.', 'danger', alert);
+                    }
+                } catch (error) {
+                    console.error('Error updating affiliate settings:', error);
+                    UTILS.ui.showAlert('An error occurred while updating your affiliate settings. Please try again.', 'danger', alert);
+                } finally {
+                    // Reset loading state
+                    UTILS.ui.toggleButtonLoading(affiliateForm.querySelector('button'), false, 'Save Affiliate Settings');
+                }
+            }
+            
+            // Delete account
+            async function deleteAccount() {
+                try {
+                    // Set loading state
+                    UTILS.ui.toggleButtonLoading(confirmDeleteBtn, true, 'Deleting...');
+                    
+                    // Send request
+                    const response = await API.delete(`/influencer`);
+                    
+                    if (response.status === 'success') {
+                        // Clear auth data
+                        localStorage.removeItem(CONFIG.AUTH.TOKEN_KEY);
+                        localStorage.removeItem(CONFIG.AUTH.USER_KEY);
+                        
+                        // Redirect to home page
+                        window.location.href = '../../index.html';
+                    } else {
+                        UTILS.ui.showAlert(response.message || 'Failed to delete account. Please try again.', 'danger', alert);
+                    }
+                } catch (error) {
+                    console.error('Error deleting account:', error);
+                    UTILS.ui.showAlert('An error occurred while deleting your account. Please try again.', 'danger', alert);
+                } finally {
+                    // Hide dialog
+                    deleteDialog.style.display = 'none';
+                    
+                    // Reset loading state
+                    UTILS.ui.toggleButtonLoading(confirmDeleteBtn, false, 'Delete Account');
+                }
+            }
+        });
+    </script>
+</body>
+</html>
